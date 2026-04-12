@@ -19,8 +19,8 @@
 
 use plegma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use plegma_core::types::{
-    DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, RegisterRequest, RegisterResponse,
-    AuthInfo,
+    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, RegisterRequest,
+    RegisterResponse,
 };
 use snafu::Snafu;
 
@@ -215,14 +215,14 @@ impl ControlClient {
 
         let size = u32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;
 
-        let payload = frame.get(4..4 + size).ok_or_else(|| {
-            ControlError::MalformedResponse {
+        let payload = frame
+            .get(4..4 + size)
+            .ok_or_else(|| ControlError::MalformedResponse {
                 message: format!(
                     "frame declares {size} bytes but only {} available",
                     frame.len() - 4
                 ),
-            }
-        })?;
+            })?;
 
         let resp: MapResponse = serde_json::from_slice(payload)?;
         Ok(resp)
@@ -282,10 +282,8 @@ impl ControlClient {
                 // Incremental peer additions/changes.
                 if let Some(changed) = resp.peers_changed {
                     for changed_peer in changed {
-                        if let Some(existing) = netmap
-                            .peers
-                            .iter_mut()
-                            .find(|p| p.key == changed_peer.key)
+                        if let Some(existing) =
+                            netmap.peers.iter_mut().find(|p| p.key == changed_peer.key)
                         {
                             *existing = changed_peer;
                         } else {
@@ -296,9 +294,7 @@ impl ControlClient {
 
                 // Peer removals.
                 if let Some(removed_keys) = resp.peers_removed {
-                    netmap
-                        .peers
-                        .retain(|p| !removed_keys.contains(&p.key));
+                    netmap.peers.retain(|p| !removed_keys.contains(&p.key));
                 }
 
                 if let Some(dns) = resp.dns_config {
@@ -593,9 +589,7 @@ mod tests {
 
         // Auth key should be nested.
         let auth = json.get("Auth").expect("Auth should be present");
-        let auth_key = auth["AuthKey"]
-            .as_str()
-            .expect("AuthKey should be string");
+        let auth_key = auth["AuthKey"].as_str().expect("AuthKey should be string");
         assert_eq!(auth_key, "tskey-auth-test123");
 
         // Hostinfo should have GoVersion set to dictyon.
@@ -616,8 +610,7 @@ mod tests {
         frame.extend_from_slice(&size.to_le_bytes());
         frame.extend_from_slice(json_body);
 
-        let resp =
-            ControlClient::parse_map_response(&frame).expect("parse should succeed");
+        let resp = ControlClient::parse_map_response(&frame).expect("parse should succeed");
 
         assert_eq!(resp.keep_alive, Some(true));
     }
