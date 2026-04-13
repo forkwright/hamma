@@ -451,6 +451,266 @@ mod tests {
         assert!(result.is_err(), "decrypting with wrong key should fail");
     }
 
+    // -----------------------------------------------------------------------
+    // New comprehensive crypto-validation tests
+    // -----------------------------------------------------------------------
+
+    /// Full IK round-trip using the public `NoiseHandshake` API on the
+    /// initiator side and a raw `snow` responder on the server side.
+    #[test]
+    fn handshake_full_ik_round_trip() {
+        let machine_key = MachinePrivate::generate();
+        let server_key = MachinePrivate::generate();
+        let server_pub = server_key.public_key();
+
+        // --- Initiator: generate msg1 via NoiseHandshake ---
+        let mut handshake = NoiseHandshake::new(machine_key, server_pub);
+        let init_frame = handshake
+            .initiation_message()
+            .expect("initiation should succeed");
+
+        // Extract noise payload from frame: [2B version][1B type][2B BE len][noise...]
+        let payload_len = u16::from_be_bytes([init_frame[3], init_frame[4]]) as usize;
+        let noise_init = &init_frame[5..5 + payload_len];
+
+        // --- Responder: process msg1, generate msg2 ---
+        let mut responder =
+            build_responder(server_key.as_bytes()).expect("responder build should succeed");
+
+        let mut payload_buf = vec![0u8; 256];
+        responder
+            .read_message(noise_init, &mut payload_buf)
+            .expect("responder should read msg1");
+
+        let mut resp_noise = vec![0u8; 256];
+        let resp_noise_len = responder
+            .write_message(&[], &mut resp_noise)
+            .expect("responder should write msg2");
+
+        // Frame the response: [1B type][2B BE len][noise...]
+        let mut framed_resp = Vec::new();
+        framed_resp.push(MSG_TYPE_RESPONSE);
+        framed_resp.extend_from_slice(
+            &u16::try_from(resp_noise_len)
+                .expect("fits u16")
+                .to_be_bytes(),
+        );
+        framed_resp.extend_from_slice(&resp_noise[..resp_noise_len]);
+
+        // --- Initiator: complete handshake ---
+        let mut client_transport = handshake
+            .process_response(&framed_resp)
+            .expect("handshake completion should succeed");
+
+        // --- Both sides now have transport; verify they can communicate ---
+        let mut server_transport = NoiseTransport::from_snow(
+            responder
+                .into_transport_mode()
+                .expect("responder into transport"),
+        );
+
+        let plaintext = b"round-trip verified";
+        let frame = client_transport
+            .encrypt(plaintext)
+            .expect("client encrypt should succeed");
+        let ct_len = u16::from_be_bytes([frame[1], frame[2]]) as usize;
+        let decrypted = server_transport
+            .decrypt(&frame[3..3 + ct_len])
+            .expect("server decrypt should succeed");
+        assert_eq!(decrypted.as_slice(), plaintext);
+    }
+
+    /// After handshake both directions encrypt and decrypt correctly.
+    #[test]
+    fn transport_encrypt_decrypt_round_trip() {
+        let (mut client, mut server) = paired_transports();
+
+        // Client → Server
+        let plaintext_cs = b"hello world";
+        let frame_cs = client.encrypt(plaintext_cs).expect("client encrypt");
+        let ct_len_cs = u16::from_be_bytes([frame_cs[1], frame_cs[2]]) as usize;
+        let decrypted_cs = server
+            .decrypt(&frame_cs[3..3 + ct_len_cs])
+            .expect("server decrypt");
+        assert_eq!(decrypted_cs.as_slice(), plaintext_cs);
+
+        // Server → Client
+        let plaintext_sc = b"goodbye";
+        let frame_sc = server.encrypt(plaintext_sc).expect("server encrypt");
+        let ct_len_sc = u16::from_be_bytes([frame_sc[1], frame_sc[2]]) as usize;
+        let decrypted_sc = client
+            .decrypt(&frame_sc[3..3 + ct_len_sc])
+            .expect("client decrypt");
+        assert_eq!(decrypted_sc.as_slice(), plaintext_sc);
+    }
+
+    /// Handshake with a mismatched server key must fail or produce
+    /// undecryptable output.
+    #[test]
+    fn transport_decrypt_with_wrong_key_fails() {
+        let (mut client, _correct_server) = paired_transports();
+
+        let frame = client.encrypt(b"secret").expect("encrypt should succeed");
+        let ct_len = u16::from_be_bytes([frame[1], frame[2]]) as usize;
+        let ciphertext = &frame[3..3 + ct_len];
+
+        // Build a completely independent session (different keys)
+        let (_other_client, mut wrong_server) = paired_transports();
+
+        let result = wrong_server.decrypt(ciphertext);
+        assert!(result.is_err(), "decrypting with wrong key must fail");
+    }
+
+    /// Exact byte layout of the initiation frame.
+    #[test]
+    fn initiation_frame_has_correct_structure() {
+        let machine_key = MachinePrivate::generate();
+        let server_key = MachinePrivate::generate();
+        let server_pub = server_key.public_key();
+
+        let mut handshake = NoiseHandshake::new(machine_key, server_pub);
+        let frame = handshake
+            .initiation_message()
+            .expect("initiation should succeed");
+
+        // Bytes 0-1: version LE u16 = 1
+        let version = u16::from_le_bytes([frame[0], frame[1]]);
+        assert_eq!(version, 1, "version should be 1");
+
+        // Byte 2: type = 0x01
+        assert_eq!(frame[2], MSG_TYPE_INITIATION, "type byte should be 0x01");
+
+        // Bytes 3-4: length BE u16
+        let declared_len = u16::from_be_bytes([frame[3], frame[4]]) as usize;
+
+        // Remaining bytes: the noise message
+        assert_eq!(
+            frame.len(),
+            5 + declared_len,
+            "frame length should match 5-byte header + declared payload"
+        );
+
+        // IK msg1: 32 (e) + 32 (s encrypted) + 16 (tag) + 16 (empty payload tag) = 96 bytes
+        assert_eq!(declared_len, 96, "IK msg1 noise payload should be 96 bytes");
+    }
+
+    /// A framed response with the wrong message type byte must be rejected.
+    #[test]
+    fn process_response_rejects_wrong_type_byte() {
+        let machine_key = MachinePrivate::generate();
+        let server_key = MachinePrivate::generate();
+        let server_pub = server_key.public_key();
+
+        let mut handshake = NoiseHandshake::new(machine_key, server_pub);
+        handshake
+            .initiation_message()
+            .expect("initiation should succeed");
+
+        // Frame with wrong type (0x03 instead of 0x02)
+        let mut bad_frame = vec![0x03u8, 0x00, 0x20];
+        bad_frame.extend_from_slice(&[0u8; 32]);
+        let result = handshake.process_response(&bad_frame);
+        assert!(result.is_err(), "wrong type byte must be rejected");
+        let err_msg = result.err().map(|e| format!("{e}")).unwrap_or_default();
+        assert!(
+            err_msg.contains("0x03"),
+            "error should name the unexpected byte: {err_msg}"
+        );
+    }
+
+    /// A frame shorter than the 3-byte header must be rejected.
+    #[test]
+    fn process_response_rejects_truncated_frame() {
+        let machine_key = MachinePrivate::generate();
+        let server_key = MachinePrivate::generate();
+        let server_pub = server_key.public_key();
+
+        let mut handshake = NoiseHandshake::new(machine_key, server_pub);
+        handshake
+            .initiation_message()
+            .expect("initiation should succeed");
+
+        // Only 2 bytes — shorter than the 3-byte minimum header
+        let truncated = vec![MSG_TYPE_RESPONSE, 0x00];
+        let result = handshake.process_response(&truncated);
+        assert!(result.is_err(), "truncated frame must be rejected");
+    }
+
+    /// Transport frame has the correct `[1B type][2B BE len][ciphertext]`
+    /// layout, and the ciphertext is `plaintext_len` + 16 (Poly1305 tag) bytes.
+    #[test]
+    fn transport_frame_has_correct_structure() {
+        let (mut client, _server) = paired_transports();
+
+        let plaintext = b"structure check";
+        let frame = client.encrypt(plaintext).expect("encrypt should succeed");
+
+        // Byte 0: type = 0x04
+        assert_eq!(frame[0], MSG_TYPE_TRANSPORT, "type byte should be 0x04");
+
+        // Bytes 1-2: length BE u16
+        let declared_len = u16::from_be_bytes([frame[1], frame[2]]) as usize;
+        assert_eq!(
+            frame.len(),
+            3 + declared_len,
+            "frame length should match 3-byte header + declared length"
+        );
+
+        // Ciphertext = plaintext + 16-byte Poly1305 tag
+        assert_eq!(
+            declared_len,
+            plaintext.len() + TAG_LEN,
+            "ciphertext should be plaintext + 16-byte tag"
+        );
+    }
+
+    /// A 4096-byte payload (the maximum) encrypts without error.
+    #[test]
+    fn transport_max_payload_accepted() {
+        let (mut client, mut server) = paired_transports();
+
+        let plaintext = vec![0xABu8; MAX_FRAME_PAYLOAD];
+        let frame = client
+            .encrypt(&plaintext)
+            .expect("max-size payload should encrypt successfully");
+
+        let ct_len = u16::from_be_bytes([frame[1], frame[2]]) as usize;
+        let decrypted = server
+            .decrypt(&frame[3..3 + ct_len])
+            .expect("max-size payload should decrypt successfully");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    /// Empty plaintext round-trips through encrypt/decrypt without error.
+    #[test]
+    fn transport_empty_payload_round_trips() {
+        let (mut client, mut server) = paired_transports();
+
+        let frame = client
+            .encrypt(&[])
+            .expect("empty payload should encrypt successfully");
+
+        // Frame should still have header + 16-byte auth tag
+        assert_eq!(
+            frame.len(),
+            3 + TAG_LEN,
+            "empty plaintext frame should be header + tag"
+        );
+
+        let ct_len = u16::from_be_bytes([frame[1], frame[2]]) as usize;
+        let decrypted = server
+            .decrypt(&frame[3..3 + ct_len])
+            .expect("empty payload should decrypt successfully");
+        assert!(
+            decrypted.is_empty(),
+            "decrypted empty payload should be empty"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared helpers
+    // -----------------------------------------------------------------------
+
     /// Helper: perform a full handshake and return paired transport states.
     fn paired_transports() -> (NoiseTransport, NoiseTransport) {
         let machine_key = MachinePrivate::generate();
