@@ -11,7 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-plegma-core = { workspace = true }
+hamma-core = { workspace = true }
 snafu = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

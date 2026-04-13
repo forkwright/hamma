@@ -1,6 +1,6 @@
 [package]
-name = "plegma-core"
-description = "Shared types for the plegma mesh networking stack"
+name = "hamma-core"
+description = "Shared types for the hamma mesh networking stack"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

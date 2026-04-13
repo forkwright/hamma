@@ -17,8 +17,8 @@
 //! - `control/controlclient/direct.go` in the Tailscale Go source
 //! - `tailcfg/tailcfg.go` for type definitions
 
-use plegma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use plegma_core::types::{
+use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use hamma_core::types::{
     AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, RegisterRequest,
     RegisterResponse,
 };
@@ -474,8 +474,8 @@ fn parse_register_response(raw: &[u8]) -> Result<RegisterResponse, ControlError>
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use plegma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-    use plegma_core::types::{DnsConfig, DnsResolver, MapResponse, Node};
+    use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+    use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node};
 
     use super::*;
 

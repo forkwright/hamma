@@ -20,7 +20,7 @@
 use std::sync::Arc;
 
 use base64::Engine;
-use plegma_core::keys::{KeyError, MachinePrivate, MachinePublic};
+use hamma_core::keys::{KeyError, MachinePrivate, MachinePublic};
 use rustls::ClientConfig;
 use snafu::{ResultExt, Snafu};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

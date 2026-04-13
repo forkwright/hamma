@@ -8,8 +8,8 @@
   "separate-pull-requests": false,
   "packages": {
     ".": {
-      "package-name": "plegma",
-      "component": "plegma",
+      "package-name": "hamma",
+      "component": "hamma",
       "changelog-path": "CHANGELOG.md",
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
