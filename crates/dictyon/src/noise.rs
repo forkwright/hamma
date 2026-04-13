@@ -13,7 +13,7 @@
 //!
 //! See `control/controlbase/` in the Tailscale Go source for reference.
 
-use plegma_core::keys::{MachinePrivate, MachinePublic};
+use hamma_core::keys::{MachinePrivate, MachinePublic};
 use snafu::Snafu;
 use snow::{Builder, HandshakeState, TransportState};
 

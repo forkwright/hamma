@@ -15,7 +15,7 @@ use dictyon::control::{ControlClient, RegisterOutcome};
 use dictyon::noise::NoiseHandshake;
 use dictyon::transport::ControlConnection;
 use dictyon::wire::{AsyncControlStream, ControlConfig, connect};
-use plegma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use tracing::{error, info, warn};
 
 const CONTROL_URL: &str = "https://controlplane.tailscale.com";

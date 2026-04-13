@@ -1,5 +1,5 @@
 {
-  description = "plegma development environment";
+  description = "hamma development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

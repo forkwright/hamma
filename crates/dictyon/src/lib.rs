@@ -2,7 +2,7 @@
 //!
 //! *δίκτυον — a net, a cast net, a thing woven to catch.*
 //!
-//! Peer-side client for the plegma mesh networking stack. Speaks
+//! Peer-side client for the hamma mesh networking stack. Speaks
 //! wire-compatible Tailscale control protocol to an upstream coordination
 //! server (tailscale.com during Phase A, histos when sovereignty is wanted),
 //! drives a `WireGuard` data plane via boringtun, traverses NATs through DERP
@@ -23,7 +23,7 @@
 //! - Route / exit-node configuration
 //!
 //! Out of scope: Taildrop, Tailscale SSH, Funnel, app connectors. Those are
-//! opinionated product features of tailscale.com and not required for plegma's
+//! opinionated product features of tailscale.com and not required for hamma's
 //! mesh-networking target.
 
 #![deny(missing_docs)]

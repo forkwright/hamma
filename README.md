@@ -1,6 +1,6 @@
-# Plegma
+# Hamma
 
-*πλέγμα  -  a woven thing, a plaited mesh, a net*
+*ἅμμα  -  a knot, a tie, a fastening*
 
 A clean-room Rust implementation of a Tailscale-compatible mesh networking stack. Pre-alpha, in design.
 
@@ -12,18 +12,18 @@ Current workstream: `dictyon`, the peer-side client.
 
 ## What this is
 
-Plegma is a Rust-native mesh networking stack  -  the pieces needed to weave a set of devices into a single flat network, speak WireGuard peer-to-peer, traverse NATs via DERP relays, and name each other via MagicDNS. It targets wire-compatibility with Tailscale's existing control plane so that devices running plegma can join the same tailnet as devices running the reference Tailscale client.
+Hamma is a Rust-native mesh networking stack  -  the pieces needed to knot a set of devices into a single flat network, speak WireGuard peer-to-peer, traverse NATs via DERP relays, and name each other via MagicDNS. It targets wire-compatibility with Tailscale's existing control plane so that devices running hamma can join the same tailnet as devices running the reference Tailscale client.
 
-**Why it exists.** A production-grade Rust implementation of the Tailscale client/server protocol does not exist. Plegma fills that gap, initially as the networking layer for the [forkwright](https://github.com/forkwright) ecosystem  -  [aletheia](https://github.com/forkwright/aletheia) (cognitive runtime), [akroasis](https://github.com/forkwright/akroasis) (signals intelligence), [harmonia](https://github.com/forkwright/harmonia) (media platform), and [thumos](https://github.com/forkwright/thumos) (sovereign mobile OS)  -  and openly as an option for anyone who wants a memory-safe, auditable mesh client.
+**Why it exists.** A production-grade Rust implementation of the Tailscale client/server protocol does not exist. Hamma fills that gap, initially as the networking layer for the [forkwright](https://github.com/forkwright) ecosystem  -  [aletheia](https://github.com/forkwright/aletheia) (cognitive runtime), [akroasis](https://github.com/forkwright/akroasis) (signals intelligence), [harmonia](https://github.com/forkwright/harmonia) (media platform), and [thumos](https://github.com/forkwright/thumos) (sovereign mobile OS)  -  and openly as an option for anyone who wants a memory-safe, auditable mesh client.
 
 ## Crates
 
 | Crate | Role | Status |
 |---|---|---|
-| `dictyon` (δίκτυον, "net") | Peer client: WireGuard data plane (via boringtun), Noise control protocol to the coordination server, DERP relay client, MagicDNS resolver, route configuration | Scaffold |
-| `plegma-core` | Shared types: Noise framing, WireGuard key types, peer identity, ACL types, protocol constants | Scaffold |
+| `dictyon` (δίκτυον, "net") | Peer client: WireGuard data plane (via boringtun), Noise control protocol to the coordination server, DERP relay client, MagicDNS resolver, route configuration | Phase A |
+| `hamma-core` | Shared types: Noise framing, WireGuard key types, peer identity, ACL types, protocol constants | Phase A |
 | `histos` (ἱστός, "loom")  -  **planned** | Coordination server: peer registry, ACL enforcement, preauth keys, DERP coordination. Replaces Headscale/tailscale.com when sovereignty is wanted | Not started |
-| `plegma-derp`  -  **planned** | DERP relay server (optional  -  can reuse Tailscale's DERP for Phase A) | Not started |
+| `hamma-derp`  -  **planned** | DERP relay server (optional  -  can reuse Tailscale's DERP for Phase A) | Not started |
 
 ## Design principles
 
@@ -35,7 +35,7 @@ Plegma is a Rust-native mesh networking stack  -  the pieces needed to weave a s
 
 ## Phases
 
-See [kanon/projects/plegma/](https://github.com/forkwright/kanon/tree/main/projects/plegma) for the full roadmap.
+See [kanon/projects/hamma/](https://github.com/forkwright/kanon/tree/main/projects/hamma) for the full roadmap.
 
 - **Phase A  -  dictyon client against tailscale.com**. Validates the Rust client on a production reference server. No histos scope.
 - **Phase B  -  histos coordination server, wire-compatible**. Matches Headscale's feature surface for forkwright self-hosting.

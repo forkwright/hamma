@@ -176,7 +176,7 @@ impl ControlConnection {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use plegma_core::keys::MachinePrivate;
+    use hamma_core::keys::MachinePrivate;
 
     use super::*;
 

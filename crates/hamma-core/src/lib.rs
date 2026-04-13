@@ -1,6 +1,6 @@
-//! # Plegma Core
+//! # Hamma Core
 //!
-//! Shared types for the plegma mesh networking stack. Consumed by `dictyon`
+//! Shared types for the hamma mesh networking stack. Consumed by `dictyon`
 //! (client) and, eventually, `histos` (coordination server). Holds the
 //! cross-crate vocabulary: Noise framing, `WireGuard` key wrappers, peer
 //! identity types, ACL representations, protocol constants.

@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-Project orientation for AI coding agents working on plegma.
+Project orientation for AI coding agents working on hamma.
 
-## What plegma is
+## What hamma is
 
 A clean-room Rust Tailscale-compatible mesh networking stack. Pre-alpha, design-phase. Built as the networking layer for the forkwright ecosystem (aletheia, akroasis, harmonia, thumos) and as an OSS contribution to the Rust networking ecosystem.
 
-See [README.md](README.md) for the public-facing description and [projects/plegma/](https://github.com/forkwright/kanon/tree/main/projects/plegma) in kanon for the full roadmap, phase plans, and decision log.
+See [README.md](README.md) for the public-facing description and [projects/hamma/](https://github.com/forkwright/kanon/tree/main/projects/hamma) in kanon for the full roadmap, phase plans, and decision log.
 
 ## Standards
 
@@ -24,10 +24,10 @@ Lint before committing: `kanon lint . --summary`. Gate: `kanon gate`.
 ## Structure
 
 ```
-plegma/
+hamma/
 ├── crates/
 │   ├── dictyon/        # peer client (headline crate, ships first)
-│   └── plegma-core/    # shared types (Noise framing, keys, ACL, protocol consts)
+│   └── hamma-core/    # shared types (Noise framing, keys, ACL, protocol consts)
 ├── .github/workflows/  # CI gates (installed by kanon init)
 ├── Cargo.toml          # workspace root
 ├── deny.toml           # dependency policy
@@ -39,7 +39,7 @@ plegma/
 
 Planned but not yet scaffolded:
 - `crates/histos/`  -  coordination server (Phase B)
-- `crates/plegma-derp/`  -  DERP relay server (Phase D, optional)
+- `crates/hamma-derp/`  -  DERP relay server (Phase D, optional)
 
 ## Commands
 
@@ -58,7 +58,7 @@ kanon lint . --summary           # full kanon lint
 - **Async runtime**: `tokio` with the actor-per-component pattern. No shared mutable state across async boundaries. `tokio::sync::Mutex` for async-locked data; `parking_lot::Mutex` for sync-only (never `std::sync::Mutex`  -  it deadlocks held across `.await`).
 - **Time**: `std::time::Instant` for monotonic time, `chrono` / `time` crate for wall-clock when displayed to humans. Wall clock is never a dependency of correctness.
 - **Networking primitives**: `tokio::net` for TCP/UDP, `boringtun` (Cloudflare) for WireGuard data plane. No raw sockets, no nix crate, no libc. No reimplementation of WireGuard crypto  -  use the audited reference.
-- **Identity types**: ed25519 for node identity, Curve25519 for WireGuard tunnel keys, X25519 for Noise handshakes. Wrap each in a newtype to prevent accidental mixing. Types live in `plegma-core`.
+- **Identity types**: ed25519 for node identity, Curve25519 for WireGuard tunnel keys, X25519 for Noise handshakes. Wrap each in a newtype to prevent accidental mixing. Types live in `hamma-core`.
 - **Configuration**: TOML files parsed via `figment` with env-var override cascade. See TOML.md in kanon standards.
 - **Logging**: `tracing` with structured fields. Never `println!` in library code. `tracing-subscriber` for the binary.
 - **No `unwrap()`, no `expect()` in library code**. Deny at workspace level. Tests may use `.expect("msg")` for clear assertion.
@@ -85,7 +85,7 @@ Until then the AGPL text is the working placeholder. Do not remove the copyleft 
 - **kanon**: standards, lint engine. Dev-time dependency.
 - **koinon** (akroasis-provided shared crate): may become a workspace dep if we need ID types shared with RF intelligence layers.
 
-Plegma does NOT depend on aletheia, thumos, harmonia, or akroasis at runtime. Those projects depend on plegma, not the reverse.
+Hamma does NOT depend on aletheia, thumos, harmonia, or akroasis at runtime. Those projects depend on hamma, not the reverse.
 
 ## Before submitting a PR
 

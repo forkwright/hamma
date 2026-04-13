@@ -2,14 +2,14 @@
 resolver = "2"
 members = [
     "crates/dictyon",
-    "crates/plegma-core",
+    "crates/hamma-core",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/forkwright/plegma"
+repository = "https://github.com/forkwright/hamma"
 rust-version = "1.85"
 
 [workspace.lints.rust]
@@ -87,7 +87,7 @@ base64 = "0.22"
 proptest = "1"
 
 # Local workspace crates
-plegma-core = { path = "crates/plegma-core", version = "0.1.0" }
+hamma-core = { path = "crates/hamma-core", version = "0.1.0" }
 
 [profile.dev.package."*"]
 opt-level = 2
