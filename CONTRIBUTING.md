@@ -66,7 +66,7 @@ Per-stage `--jobs` / `--test-threads` are pinned to 8 so parallel rustc + nextes
 
 ## Standards
 
-All work must pass [kanon standards](https://github.com/forkwright/kanon) - `RUST.md`, `TESTING.md`, `SECURITY.md`, `WRITING.md`, `ARCHITECTURE.md`, `REPO-SETUP.md`. Run `kanon lint . --summary` before committing and `kanon gate` before pushing.
+All work must pass the internal standards corpus: `RUST.md`, `TESTING.md`, `SECURITY.md`, `WRITING.md`, `ARCHITECTURE.md`, `REPO-SETUP.md`. Run `kanon lint . --summary` before committing and `kanon gate` before pushing.
 
 ## Branch naming and commit format
 

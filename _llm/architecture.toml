@@ -6,7 +6,7 @@ source_docs = [
   "README.md",
   "CLAUDE.md",
   "Cargo.toml",
-  "kanon/projects/hamma/STATE.md",
+  "<canonical-state-doc>/STATE.md",
 ]
 
 [architecture]
