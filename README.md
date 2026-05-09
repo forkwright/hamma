@@ -31,11 +31,11 @@ Hamma is a Rust-native mesh networking stack  -  the pieces needed to knot a set
 2. **Wire-compatible first.** Phase A targets interop with tailscale.com's control plane so dictyon can be validated against a reference server before histos exists. Protocol extensions are opt-in, layered on top, never break compat.
 3. **Small feature target.** Peer WG, MagicDNS, exit nodes, ACLs. Not Taildrop, Tailscale SSH, Funnel, or app connectors. Those can be added later if anyone wants them.
 4. **Sovereignty extensions.** Future `histos` will add forkwright-specific extensions: hardware-key-signed admin operations (FIDO2 attestation), tamper-evident peer enrollment, measured-boot attestation hooks. Upstream-incompatible, opt-in.
-5. **Kanon standards.** Built against [kanon](https://github.com/forkwright/kanon) linting, formatting, and testing standards. Same quality floor as the rest of forkwright.
+5. **Shared standards.** Built against the internal linting, formatting, and testing standards. Same quality floor as the rest of forkwright.
 
 ## Phases
 
-See [kanon/projects/hamma/](https://github.com/forkwright/kanon/tree/main/projects/hamma) for the full roadmap.
+See the internal project roadmap for full sequencing.
 
 - **Phase A  -  dictyon client against tailscale.com**. Validates the Rust client on a production reference server. No histos scope.
 - **Phase B  -  histos coordination server, wire-compatible**. Matches Headscale's feature surface for forkwright self-hosting.
