@@ -1,0 +1,41 @@
+[meta]
+name = "hamma"
+repo = "forkwright/hamma"
+generated = false
+source_docs = [
+  "README.md",
+  "kanon/projects/hamma/STATE.md",
+]
+
+[glossary]
+description = "Domain vocabulary for hamma."
+
+[[terms]]
+term = "hamma"
+definition = "Knot or fastening; the mesh networking workspace."
+canonical = true
+
+[[terms]]
+term = "dictyon"
+definition = "Net; the peer client crate."
+canonical = true
+
+[[terms]]
+term = "histos"
+definition = "Loom; the planned sovereign coordination server."
+canonical = true
+
+[[terms]]
+term = "DERP"
+definition = "Relay transport used for NAT traversal when direct peer paths fail."
+canonical = true
+
+[[terms]]
+term = "MagicDNS"
+definition = "Tailnet DNS naming surface planned for the client."
+canonical = true
+
+[[terms]]
+term = "WireGuard data plane"
+definition = "Encrypted peer-to-peer tunnel carried by boringtun in Phase A."
+canonical = true

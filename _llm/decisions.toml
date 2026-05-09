@@ -1,0 +1,44 @@
+[meta]
+name = "hamma"
+repo = "forkwright/hamma"
+generated = false
+source_docs = [
+  "README.md",
+  "CLAUDE.md",
+  "kanon/projects/hamma/STATE.md",
+]
+
+[decisions]
+summary = "Core architecture decisions for the hamma mesh networking stack."
+
+[[decision]]
+id = "D-clean-room-rust"
+title = "Clean-room Rust implementation"
+status = "accepted"
+context = "The fleet needs an auditable memory-safe mesh stack."
+decision = "Write the stack in Rust, author no C, and use boringtun only for the audited WireGuard data plane."
+consequences = "Protocol and control-plane behavior stays inspectable while WireGuard crypto/data-plane risk is bounded."
+
+[[decision]]
+id = "D-wire-compatible-first"
+title = "Validate against tailscale.com before histos"
+status = "accepted"
+context = "A sovereign server is useful only after the peer client is proven against a reference implementation."
+decision = "Phase A targets tailscale.com wire compatibility before building histos."
+consequences = "Phase A depends on operator-provided tailnet credentials and does not yet claim full sovereignty."
+
+[[decision]]
+id = "D-small-client-scope"
+title = "Keep Phase A feature target narrow"
+status = "accepted"
+context = "Tailscale's full product surface is larger than the fleet's immediate need."
+decision = "Scope Phase A to peer WireGuard, Noise control protocol, DERP relay client, MagicDNS, routes, exit nodes, and ACL evaluation."
+consequences = "Taildrop, SSH, Funnel, app connectors, and subnet router scope wait."
+
+[[decision]]
+id = "D-histos-extensions"
+title = "Keep sovereignty extensions opt-in"
+status = "accepted"
+context = "Titan-signed admin operations, measured boot, and canary behavior are fleet-specific."
+decision = "Layer histos sovereignty extensions above upstream-compatible behavior."
+consequences = "Hamma can stay wire-compatible while supporting stronger forkwright deployments."
