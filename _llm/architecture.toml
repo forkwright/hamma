@@ -1,0 +1,47 @@
+[meta]
+name = "hamma"
+repo = "forkwright/hamma"
+generated = false
+source_docs = [
+  "README.md",
+  "CLAUDE.md",
+  "Cargo.toml",
+  "kanon/projects/hamma/STATE.md",
+]
+
+[architecture]
+summary = "Clean-room Rust implementation of a Tailscale-compatible mesh networking stack, starting with the dictyon client and shared hamma-core types."
+layers = [
+  "core-types",
+  "client",
+  "control-protocol",
+  "wireguard-data-plane",
+  "derp",
+  "dns",
+  "coordination-server",
+]
+
+[[architecture.crates]]
+name = "hamma-core"
+path = "crates/hamma-core"
+role = "Shared Noise framing, WireGuard key types, peer identity, ACL types, and protocol constants."
+
+[[architecture.crates]]
+name = "dictyon"
+path = "crates/dictyon"
+role = "Peer client: control protocol, registration, map streaming, and planned WireGuard data plane."
+
+[[architecture.crates]]
+name = "histos"
+path = "crates/histos"
+role = "Planned coordination server replacing tailscale.com when sovereignty is wanted."
+
+[[architecture.crates]]
+name = "hamma-derp"
+path = "crates/hamma-derp"
+role = "Planned optional DERP relay server."
+
+[[interfaces]]
+name = "dictyon client"
+kind = "cli"
+path = "crates/dictyon"

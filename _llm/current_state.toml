@@ -1,0 +1,31 @@
+[meta]
+name = "hamma"
+repo = "forkwright/hamma"
+generated = false
+source_docs = [
+  "README.md",
+  "kanon/projects/hamma/STATE.md",
+]
+
+[state]
+summary = "Hamma is pre-alpha, actively implementing the dictyon client against tailscale.com before the sovereign histos server."
+current_phase = "Phase A: dictyon client implementation; milestones 1-3 complete; milestone 4 WireGuard data plane next."
+updated = "2026-05-01"
+
+[[recent]]
+date = "2026-04-22"
+item = "NOTICE canonicalized and forge sync timer active."
+
+[[recent]]
+date = "2026-04-13"
+item = "Milestone 3 shipped TCP/TLS connection, registration flow, and streaming map loop."
+
+[[open_threads]]
+name = "WireGuard data plane"
+issue = 0
+status = "Next milestone: boringtun-backed peer sessions."
+
+[[open_threads]]
+name = "License reconsideration"
+issue = 0
+status = "AGPL default may be reconsidered before first public release for Rust-networking adoption."
