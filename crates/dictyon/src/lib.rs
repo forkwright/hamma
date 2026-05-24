@@ -1,6 +1,6 @@
 //! # Dictyon
 //!
-//! *δίκτυον — a net, a cast net, a thing woven to catch.*
+//! *δίκτυον - a net, a cast net, a thing woven to catch.*
 //!
 //! Peer-side client for the hamma mesh networking stack. Speaks
 //! wire-compatible Tailscale control protocol to an upstream coordination

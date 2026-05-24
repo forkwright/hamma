@@ -318,7 +318,7 @@ fn process_response_rejects_truncated_frame() {
         .initiation_message()
         .expect("initiation should succeed");
 
-    // Only 2 bytes — shorter than the 3-byte minimum header
+    // Only 2 bytes - shorter than the 3-byte minimum header
     let truncated = vec![MSG_TYPE_RESPONSE, 0x00];
     let result = handshake.process_response(&truncated);
     assert!(result.is_err(), "truncated frame must be rejected");

@@ -1,6 +1,6 @@
 //! Behavioral configuration for the hamma stack.
 //!
-//! Every field in [`Config`] is a **tuning knob** — a value that a reasonable
+//! Every field in [`Config`] is a **tuning knob** - a value that a reasonable
 //! operator (or an agent, via aletheia's parameter registry, forkwright/hamma#7)
 //! might want to change without recompiling. Values documented here match the
 //! current hard-coded defaults; changing the default here changes the default
@@ -80,7 +80,7 @@ pub const DEFAULT_HANDSHAKE_SCRATCH_BYTES: usize = 256;
 
 /// Tuning knobs for the wire layer (TCP/TLS/HTTP upgrade I/O).
 ///
-/// Applies to [`dictyon::wire`](../../dictyon/wire/index.html) — the module
+/// Applies to [`dictyon::wire`](../../dictyon/wire/index.html) - the module
 /// that owns raw socket I/O and the HTTP upgrade handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,7 +89,7 @@ pub struct WireConfig {
     /// Maximum HTTP response header block we will buffer, in bytes.
     ///
     /// **Controls:** memory bound for header parsing; attacker-resilience.
-    /// **Range:** `[1024, 65_536]` — below 1 KiB breaks legitimate control
+    /// **Range:** `[1024, 65_536]` - below 1 KiB breaks legitimate control
     /// servers; above 64 KiB is wasted memory per connection.
     /// **Default:** 8 KiB. Raise if a control server sends very large
     /// header blocks (e.g. many cookies); lower to harden against abuse.
@@ -107,7 +107,7 @@ pub struct WireConfig {
     /// Initial capacity hint for the header-scan buffer, in bytes.
     ///
     /// **Controls:** number of allocations during header read on small
-    /// responses. Does not cap size — that is `max_header_bytes`.
+    /// responses. Does not cap size - that is `max_header_bytes`.
     /// **Range:** `[64, max_header_bytes]`.
     /// **Default:** 512.
     pub header_read_initial_capacity: usize,
@@ -160,10 +160,10 @@ pub struct NoiseConfig {
     ///
     /// **Controls:** largest single control-plane message that can be sent
     /// without caller-side chunking.
-    /// **Range:** `[256, 65_519]` — the wire format uses a `u16` length;
+    /// **Range:** `[256, 65_519]` - the wire format uses a `u16` length;
     /// the 16-byte Poly1305 tag is added on top, so the absolute ceiling is
     /// `u16::MAX - 16 = 65_519`.
-    /// **Default:** 4 KiB — matches the reference implementation and most
+    /// **Default:** 4 KiB - matches the reference implementation and most
     /// control-plane message sizes.
     pub max_frame_payload: usize,
 
@@ -173,7 +173,7 @@ pub struct NoiseConfig {
     /// `write_message`/`read_message`. Must be ≥ the largest handshake
     /// message (≤ 96 bytes for IK without payload).
     /// **Range:** `[128, 4096]`.
-    /// **Default:** 256 — leaves headroom for payload-bearing IK variants.
+    /// **Default:** 256 - leaves headroom for payload-bearing IK variants.
     pub handshake_scratch_bytes: usize,
 }
 
@@ -190,7 +190,7 @@ impl Default for NoiseConfig {
 // Top-level Config
 // ---------------------------------------------------------------------------
 
-/// Top-level hamma configuration — a flat, persistable snapshot of every
+/// Top-level hamma configuration - a flat, persistable snapshot of every
 /// behavioral tuning knob across the stack.
 ///
 /// Construct via [`Config::default`] and mutate individual fields, or load
