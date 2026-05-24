@@ -297,7 +297,7 @@ async fn connects_and_completes_noise_handshake() {
         let (tcp2, _) = listener.accept().await.expect("accept noise conn");
         let mut tls2 = acceptor.accept(tcp2).await.expect("tls accept noise conn");
         let _transport = handle_noise_upgrade(&mut tls2, &keys_clone).await;
-        // Handshake complete — test just verifies connect() returns Ok.
+        // Handshake complete - test just verifies connect() returns Ok.
     });
 
     let config = dictyon::wire::ControlConfig::new(
@@ -408,7 +408,7 @@ async fn register_returns_authorized_with_preauth_key() {
         .await
         .expect("connect should succeed");
 
-    // Need a ControlConnection to build a ControlClient — use the helper
+    // Need a ControlConnection to build a ControlClient - use the helper
     // pattern from control.rs tests.
     let (conn, ()) = make_dummy_transport();
     let mut client = dictyon::control::ControlClient::new(conn, machine_key, node_key, disco_key);
@@ -434,7 +434,7 @@ async fn connection_to_unreachable_host_returns_error() {
         MachinePrivate::generate(),
     );
 
-    // Use the default (webpki) TLS config — we expect a TCP connect failure
+    // Use the default (webpki) TLS config - we expect a TCP connect failure
     // before TLS is even attempted.
     let result = dictyon::wire::connect(&config).await;
     assert!(
