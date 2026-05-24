@@ -108,7 +108,7 @@ async fn run() -> Result<(), ExampleError> {
     let auth_key = match std::env::var("TS_AUTHKEY") {
         Ok(value) => Some(value),
         Err(std::env::VarError::NotPresent) => {
-            warn!("TS_AUTHKEY not set — server will require interactive auth");
+            warn!("TS_AUTHKEY not set - server will require interactive auth");
             None
         }
         Err(e) => {

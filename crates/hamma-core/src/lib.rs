@@ -6,7 +6,7 @@
 //! identity types, ACL representations, protocol constants.
 //!
 //! This crate has no network I/O and minimal dependencies. It must compile
-//! fast and stay boring — types, not behavior.
+//! fast and stay boring - types, not behavior.
 
 #![deny(missing_docs)]
 
