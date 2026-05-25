@@ -9,8 +9,8 @@
 //!
 //! Control plane messages are JSON, framed as `[4-byte LE size][payload]`.
 //! Payloads may be zstd-compressed (indicated by `Compress: "zstd"` in the
-//! request). This implementation handles uncompressed JSON; zstd support
-//! is deferred.
+//! request). Map response parsing accepts both compressed and uncompressed
+//! payloads.
 //!
 //! # References
 //!
@@ -293,6 +293,7 @@ impl ControlClient {
     pub fn build_map_request(&self) -> Result<Vec<u8>, ControlError> {
         let req = MapRequest {
             version: 68,
+            compress: Some("zstd".to_string()),
             node_key: self.node_key.public_key().to_hex(),
             disco_key: self.disco_key.public_key().to_hex(),
             endpoints: Vec::new(),
@@ -338,7 +339,8 @@ impl ControlClient {
                 ),
             })?;
 
-        let resp: MapResponse = serde_json::from_slice(payload)?;
+        let payload = decode_map_payload(payload)?;
+        let resp: MapResponse = serde_json::from_slice(&payload)?;
         Ok(resp)
     }
 
@@ -532,6 +534,22 @@ fn frame_message(payload: &[u8]) -> Vec<u8> {
     framed.extend_from_slice(&size.to_le_bytes());
     framed.extend_from_slice(payload);
     framed
+}
+
+fn decode_map_payload(payload: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, ControlError> {
+    if !is_zstd_frame(payload) {
+        return Ok(std::borrow::Cow::Borrowed(payload));
+    }
+
+    zstd::stream::decode_all(payload)
+        .map(std::borrow::Cow::Owned)
+        .map_err(|err| ControlError::MalformedResponse {
+            message: format!("zstd decode failed: {err}"),
+        })
+}
+
+fn is_zstd_frame(payload: &[u8]) -> bool {
+    matches!(payload.get(..4), Some([0x28, 0xb5, 0x2f, 0xfd]))
 }
 
 /// Deserialize a [`RegisterResponse`] from raw (decrypted) bytes.
