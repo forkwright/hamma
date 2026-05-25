@@ -427,6 +427,80 @@ async fn register_returns_authorized_with_preauth_key() {
 }
 
 #[tokio::test]
+async fn map_stream_receives_compressed_full_map_after_register() {
+    let (server_tls_cfg, client_tls_cfg) = make_test_tls_pair();
+    let keys = Arc::new(MockServerKeys::generate());
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("local_addr");
+    let acceptor = TlsAcceptor::from(Arc::new(server_tls_cfg));
+
+    let keys_clone = Arc::clone(&keys);
+    let server = tokio::spawn(async move {
+        // Connection 1: key fetch.
+        let (tcp1, _) = listener.accept().await.expect("accept key conn");
+        let mut tls1 = acceptor.accept(tcp1).await.expect("tls accept key conn");
+        handle_key_request(&mut tls1, &keys_clone).await;
+
+        // Connection 2: Noise upgrade + register RPC + map stream.
+        let (tcp2, _) = listener.accept().await.expect("accept noise conn");
+        let mut tls2 = acceptor.accept(tcp2).await.expect("tls accept noise conn");
+        let mut transport = handle_noise_upgrade(&mut tls2, &keys_clone).await;
+        handle_register_and_map_stream(&mut tls2, &mut transport).await;
+    });
+
+    let machine_key = MachinePrivate::generate();
+    let node_key = hamma_core::keys::NodePrivate::generate();
+    let disco_key = hamma_core::keys::DiscoPrivate::generate();
+
+    let config = dictyon::wire::ControlConfig::new(
+        format!("https://127.0.0.1:{}", addr.port()),
+        MachinePrivate::from_bytes(*machine_key.as_bytes()),
+    );
+
+    let mut stream = dictyon::wire::connect_with_tls(&config, client_tls_cfg)
+        .await
+        .expect("connect should succeed");
+
+    let (conn, ()) = make_dummy_transport();
+    let mut client = dictyon::control::ControlClient::new(conn, machine_key, node_key, disco_key);
+
+    let outcome = client
+        .register(&mut stream, Some("tskey-auth-test"))
+        .await
+        .expect("register should succeed");
+    assert!(
+        matches!(outcome, dictyon::control::RegisterOutcome::Authorized(_)),
+        "expected Authorized outcome"
+    );
+
+    client
+        .start_map_stream(&mut stream)
+        .await
+        .expect("start_map_stream should send request");
+    let is_keepalive = client
+        .recv_map_update(&mut stream)
+        .await
+        .expect("recv_map_update should parse and apply map response");
+
+    assert!(!is_keepalive, "full map response is not a keepalive");
+    let self_node = client.self_node().expect("self node should be applied");
+    assert_eq!(self_node.id, 100);
+    assert_eq!(self_node.stable_id.as_deref(), Some("node-self"));
+    assert_eq!(self_node.addresses, ["100.64.0.1/32"]);
+    assert_eq!(client.peers().len(), 1);
+    assert_eq!(client.peers()[0].id, 200);
+    assert_eq!(
+        client.peers()[0].endpoints.as_deref(),
+        Some(&["203.0.113.10:41641".to_string()][..])
+    );
+
+    server.await.expect("mock server should not panic");
+}
+
+#[tokio::test]
 async fn connection_to_unreachable_host_returns_error() {
     // Port 1 is reserved; connection should fail immediately.
     let config = dictyon::wire::ControlConfig::new(
@@ -495,3 +569,83 @@ fn make_dummy_transport() -> (dictyon::transport::ControlConnection, ()) {
     let conn = dictyon::transport::ControlConnection::from_transport(client_noise);
     (conn, ())
 }
+
+async fn handle_register_and_map_stream(
+    stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+    transport: &mut snow::TransportState,
+) {
+    let ciphertext = read_noise_frame(stream).await;
+    let mut plaintext_buf = vec![0u8; ciphertext.len()];
+    let pt_len = transport
+        .read_message(&ciphertext, &mut plaintext_buf)
+        .expect("decrypt register request");
+    let register_payload = control_payload(&plaintext_buf[..pt_len], "register request frame");
+    let req: serde_json::Value =
+        serde_json::from_slice(register_payload).expect("register request should be valid JSON");
+    assert!(
+        req.get("NodeKey").is_some(),
+        "register request missing NodeKey"
+    );
+
+    let resp_json = br#"{"MachineAuthorized":true}"#;
+    write_noise_frame(stream, transport, resp_json).await;
+    stream.flush().await.expect("flush after register response");
+
+    let ciphertext = read_noise_frame(stream).await;
+    let mut plaintext_buf = vec![0u8; ciphertext.len()];
+    let pt_len = transport
+        .read_message(&ciphertext, &mut plaintext_buf)
+        .expect("decrypt map request");
+    let map_payload = control_payload(&plaintext_buf[..pt_len], "map request frame");
+    let req: serde_json::Value =
+        serde_json::from_slice(map_payload).expect("map request should be valid JSON");
+    assert_eq!(req["Stream"].as_bool(), Some(true));
+    assert_eq!(req["Compress"].as_str(), Some("zstd"));
+
+    let compressed =
+        zstd::stream::encode_all(FULL_MAP_RESPONSE_JSON, 0).expect("map response should compress");
+    let map_frame = frame_control_payload(&compressed);
+    write_noise_frame(stream, transport, &map_frame).await;
+    stream.flush().await.expect("flush after map response");
+}
+
+fn control_payload<'a>(plaintext: &'a [u8], label: &str) -> &'a [u8] {
+    assert!(plaintext.len() >= 4, "{label} too short");
+    let payload_len =
+        u32::from_le_bytes([plaintext[0], plaintext[1], plaintext[2], plaintext[3]]) as usize;
+    assert!(
+        plaintext.len() >= 4 + payload_len,
+        "{label} declares {payload_len} bytes but only {} available",
+        plaintext.len().saturating_sub(4)
+    );
+    &plaintext[4..4 + payload_len]
+}
+
+fn frame_control_payload(payload: &[u8]) -> Vec<u8> {
+    let payload_len = u32::try_from(payload.len()).expect("control payload fits u32");
+    let mut frame = Vec::with_capacity(4 + payload.len());
+    frame.extend_from_slice(&payload_len.to_le_bytes());
+    frame.extend_from_slice(payload);
+    frame
+}
+
+const FULL_MAP_RESPONSE_JSON: &[u8] = br#"{
+    "Node": {
+        "ID": 100,
+        "StableID": "node-self",
+        "Key": "nodekey:self",
+        "Name": "self.tail.test.",
+        "Addresses": ["100.64.0.1/32"],
+        "Online": true
+    },
+    "Peers": [
+        {
+            "ID": 200,
+            "Key": "nodekey:peer",
+            "Name": "peer.tail.test.",
+            "Addresses": ["100.64.0.2/32"],
+            "Endpoints": ["203.0.113.10:41641"],
+            "Online": true
+        }
+    ]
+}"#;
