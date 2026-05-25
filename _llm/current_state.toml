@@ -24,8 +24,3 @@ item = "Milestone 3 shipped TCP/TLS connection, registration flow, and streaming
 name = "WireGuard data plane"
 issue = 0
 status = "Next milestone: boringtun-backed peer sessions."
-
-[[open_threads]]
-name = "License reconsideration"
-issue = 0
-status = "AGPL default may be reconsidered before first public release for Rust-networking adoption."

@@ -44,9 +44,9 @@ See the internal project roadmap for full sequencing.
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE).
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
 
-**Note for downstream consumers**: AGPL is the forkwright project default. For wider Rust-ecosystem adoption (where permissive licenses are the convention  -  boringtun is BSD-3, hickory-dns is MIT/Apache, tailscale itself is BSD-3), the license may be revisited before the first public release. Open discussion welcome.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this crate by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
 
 ## Contributing
 
