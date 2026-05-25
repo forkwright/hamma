@@ -19,7 +19,7 @@
 
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, PeerChange,
+    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, PeerChange, PeerRemoval,
     RegisterRequest, RegisterResponse,
 };
 use snafu::Snafu;
@@ -351,7 +351,7 @@ impl ControlClient {
     ///   entry with the same key, or is appended if new.
     /// - `peers_changed_patch`: lightweight mutations are applied to known
     ///   peers with matching node IDs.
-    /// - `peers_removed`: peers with matching keys are removed.
+    /// - `peers_removed`: peers with matching node IDs or keys are removed.
     /// - `node`: updates the self node if present.
     /// - `dns_config` and `derp_map`: replace the previous values if
     ///   present.
@@ -415,8 +415,10 @@ impl ControlClient {
                 }
 
                 // Peer removals.
-                if let Some(removed_keys) = resp.peers_removed {
-                    netmap.peers.retain(|p| !removed_keys.contains(&p.key));
+                if let Some(removals) = resp.peers_removed {
+                    netmap
+                        .peers
+                        .retain(|peer| !removals.iter().any(|removal| removes_peer(removal, peer)));
                 }
 
                 if let Some(changes) = resp.peers_changed_patch {
@@ -505,6 +507,13 @@ fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
 
     if let Some(key_expiry) = change.key_expiry {
         peer.key_expiry = Some(key_expiry);
+    }
+}
+
+fn removes_peer(removal: &PeerRemoval, peer: &Node) -> bool {
+    match removal {
+        PeerRemoval::NodeId(node_id) => peer.id == *node_id,
+        PeerRemoval::NodeKey(key) => peer.key == *key,
     }
 }
 
