@@ -19,8 +19,8 @@
 
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, RegisterRequest,
-    RegisterResponse,
+    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, PeerChange,
+    RegisterRequest, RegisterResponse,
 };
 use snafu::Snafu;
 
@@ -349,6 +349,8 @@ impl ControlClient {
     ///
     /// - `peers_changed`: each changed/added peer replaces the existing
     ///   entry with the same key, or is appended if new.
+    /// - `peers_changed_patch`: lightweight mutations are applied to known
+    ///   peers with matching node IDs.
     /// - `peers_removed`: peers with matching keys are removed.
     /// - `node`: updates the self node if present.
     /// - `dns_config` and `derp_map`: replace the previous values if
@@ -417,6 +419,12 @@ impl ControlClient {
                     netmap.peers.retain(|p| !removed_keys.contains(&p.key));
                 }
 
+                if let Some(changes) = resp.peers_changed_patch {
+                    for change in changes {
+                        apply_peer_change(&mut netmap.peers, change);
+                    }
+                }
+
                 if let Some(dns) = resp.dns_config {
                     netmap.dns_config = Some(dns);
                 }
@@ -459,6 +467,44 @@ impl ControlClient {
             hostname,
             go_version: "dictyon/0.1.0".to_string(),
         }
+    }
+}
+
+fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
+    let Some(peer) = peers.iter_mut().find(|peer| peer.id == change.node_id) else {
+        return;
+    };
+
+    if let Some(region) = change.derp_region.filter(|region| *region > 0) {
+        peer.derp = Some(format!("127.3.3.40:{region}"));
+    }
+
+    if let Some(cap) = change.cap.filter(|cap| *cap > 0) {
+        peer.cap = Some(cap);
+    }
+
+    if let Some(endpoints) = change.endpoints.filter(|endpoints| !endpoints.is_empty()) {
+        peer.endpoints = Some(endpoints);
+    }
+
+    if let Some(key) = change.key {
+        peer.key = key;
+    }
+
+    if let Some(disco_key) = change.disco_key {
+        peer.disco_key = Some(disco_key);
+    }
+
+    if let Some(online) = change.online {
+        peer.online = Some(online);
+    }
+
+    if let Some(last_seen) = change.last_seen {
+        peer.last_seen = Some(last_seen);
+    }
+
+    if let Some(key_expiry) = change.key_expiry {
+        peer.key_expiry = Some(key_expiry);
     }
 }
 

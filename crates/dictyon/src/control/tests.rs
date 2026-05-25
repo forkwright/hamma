@@ -9,7 +9,7 @@
 )]
 
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node};
+use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange};
 
 use super::*;
 
@@ -228,6 +228,109 @@ fn apply_map_response_removes_peers() {
     assert_eq!(client.peers().len(), 2);
     assert_eq!(client.peers()[0].key, "nodekey:peer1");
     assert_eq!(client.peers()[1].key, "nodekey:peer3");
+}
+
+#[test]
+fn apply_map_response_applies_peer_patch_to_known_peer() {
+    let mut client = paired_client();
+
+    let initial = MapResponse {
+        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
+        peers: Some(vec![sample_node(2, "nodekey:peer1", "peer1.ts.net.")]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(initial);
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: Some(vec![PeerChange {
+            node_id: 2,
+            derp_region: Some(7),
+            cap: Some(69),
+            cap_map: None,
+            endpoints: Some(vec!["203.0.113.10:41641".to_string()]),
+            key: Some("nodekey:peer1-rotated".to_string()),
+            disco_key: Some("discokey:peer1".to_string()),
+            online: Some(true),
+            last_seen: Some("2026-05-25T12:00:00Z".to_string()),
+            key_expiry: Some("2026-06-25T12:00:00Z".to_string()),
+        }]),
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(delta);
+
+    let peer = &client.peers()[0];
+    assert_eq!(peer.id, 2);
+    assert_eq!(peer.derp.as_deref(), Some("127.3.3.40:7"));
+    assert_eq!(peer.cap, Some(69));
+    assert_eq!(
+        peer.endpoints.as_deref(),
+        Some(["203.0.113.10:41641".to_string()].as_slice())
+    );
+    assert_eq!(peer.key, "nodekey:peer1-rotated");
+    assert_eq!(peer.disco_key.as_deref(), Some("discokey:peer1"));
+    assert_eq!(peer.online, Some(true));
+    assert_eq!(peer.last_seen.as_deref(), Some("2026-05-25T12:00:00Z"));
+    assert_eq!(peer.key_expiry.as_deref(), Some("2026-06-25T12:00:00Z"));
+}
+
+#[test]
+fn apply_map_response_ignores_peer_patch_for_unknown_peer() {
+    let mut client = paired_client();
+
+    let initial = MapResponse {
+        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
+        peers: Some(vec![sample_node(2, "nodekey:peer1", "peer1.ts.net.")]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(initial);
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: Some(vec![PeerChange {
+            node_id: 99,
+            derp_region: Some(7),
+            cap: Some(69),
+            cap_map: None,
+            endpoints: Some(vec!["203.0.113.10:41641".to_string()]),
+            key: Some("nodekey:unknown".to_string()),
+            disco_key: Some("discokey:unknown".to_string()),
+            online: Some(true),
+            last_seen: Some("2026-05-25T12:00:00Z".to_string()),
+            key_expiry: Some("2026-06-25T12:00:00Z".to_string()),
+        }]),
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(delta);
+
+    assert_eq!(client.peers().len(), 1);
+    let peer = &client.peers()[0];
+    assert_eq!(peer.id, 2);
+    assert_eq!(peer.key, "nodekey:peer1");
+    assert!(peer.derp.is_none());
+    assert!(peer.endpoints.is_none());
+    assert!(peer.disco_key.is_none());
+    assert!(peer.online.is_none());
 }
 
 #[test]
