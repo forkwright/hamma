@@ -114,6 +114,13 @@ pub struct MapRequest {
     #[serde(rename = "Version")]
     pub version: u64,
 
+    /// Optional response compression requested from the control server.
+    ///
+    /// Tailscale-compatible servers accept `"zstd"` to send each map response
+    /// payload as an independently compressed zstandard frame.
+    #[serde(rename = "Compress", skip_serializing_if = "Option::is_none")]
+    pub compress: Option<String>,
+
     /// This node's public key, serialized as `"nodekey:hex..."`. Public
     /// identifier, not a secret.
     #[serde(rename = "NodeKey")]

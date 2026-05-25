@@ -64,6 +64,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 zeroize = { version = "1", features = ["derive"] }
 rand = "0.8"
 base64 = "0.22"
+zstd = "0.13"
 
 # Testing
 proptest = "1"
