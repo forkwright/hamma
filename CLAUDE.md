@@ -40,7 +40,8 @@ hamma/
 ├── clippy.toml         # lint configuration
 ├── rustfmt.toml        # format configuration
 ├── flake.nix           # reproducible dev shell
-└── LICENSE             # AGPL-3.0-or-later
+├── LICENSE-MIT         # dual-license: MIT
+└── LICENSE-APACHE      # dual-license: Apache-2.0
 ```
 
 Planned but not yet scaffolded:
@@ -74,17 +75,9 @@ kanon lint . --summary           # full kanon lint
 
 **Phase A**: dictyon client against tailscale.com control plane. No histos scope yet. Milestone: dictyon can join an existing tailnet, establish peer-to-peer WG tunnels with tailscale.com-managed peers, resolve MagicDNS names, and route via Mullvad exit nodes.
 
-## License reconsideration item
+## License
 
-The forkwright project default is AGPL-3.0-or-later. For a low-level networking library intended for ecosystem adoption, this may hurt uptake  -  the Rust networking convention is permissive (boringtun is BSD-3, hickory-dns is MIT/Apache, tokio is MIT, tailscale itself is BSD-3).
-
-**Before the first public release** (tag v0.1.0 or equivalent), revisit the license with Cody:
-
-- Option A: keep AGPL-3.0-or-later (sovereignty maximalism, forkwright-internal use dominates)
-- Option B: switch to Apache-2.0 (Rust-ecosystem convention, maximal adoption)
-- Option C: dual MIT/Apache-2.0 (idiomatic Rust standard, no patent ambiguity)
-
-Until then the AGPL text is the working placeholder. Do not remove the copyleft without discussion.
+Dual MIT / Apache-2.0 (idiomatic Rust ecosystem standard). See `LICENSE-MIT` and `LICENSE-APACHE` at the repo root. Contributions are dual-licensed under the same terms per the Rust convention.
 
 ## Dependencies on other forkwright projects
 
