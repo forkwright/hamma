@@ -59,6 +59,7 @@ fn machine_public_from_hex_rejects_wrong_length() {
 fn map_request_round_trips_through_json() {
     let req = MapRequest {
         version: 68,
+        compress: Some("zstd".to_string()),
         node_key: "nodekey:abc".to_string(),
         disco_key: "discokey:def".to_string(),
         endpoints: vec!["1.2.3.4:41641".to_string()],
@@ -74,6 +75,7 @@ fn map_request_round_trips_through_json() {
     let json = serde_json::to_string(&req).expect("MapRequest serializes");
     assert!(json.contains("\"NodeKey\":\"nodekey:abc\""));
     assert!(json.contains("\"Version\":68"));
+    assert!(json.contains("\"Compress\":\"zstd\""));
 }
 
 #[test]

@@ -407,6 +407,22 @@ fn register_builds_correct_json() {
 }
 
 #[test]
+fn map_request_advertises_zstd_compression() {
+    let client = paired_client();
+    let payload = client
+        .build_map_request()
+        .expect("map request should serialize");
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&payload).expect("payload should be valid JSON");
+
+    assert_eq!(json["Version"].as_u64(), Some(68));
+    assert_eq!(json["Stream"].as_bool(), Some(true));
+    assert_eq!(json["OmitPeers"].as_bool(), Some(false));
+    assert_eq!(json["Compress"].as_str(), Some("zstd"));
+}
+
+#[test]
 fn parse_map_response_extracts_json() {
     let json_body = br#"{"KeepAlive":true}"#;
     let size = u32::try_from(json_body.len()).expect("test payload fits u32");
@@ -414,6 +430,22 @@ fn parse_map_response_extracts_json() {
     let mut frame = Vec::new();
     frame.extend_from_slice(&size.to_le_bytes());
     frame.extend_from_slice(json_body);
+
+    let resp = ControlClient::parse_map_response(&frame).expect("parse should succeed");
+
+    assert_eq!(resp.keep_alive, Some(true));
+}
+
+#[test]
+fn parse_map_response_extracts_zstd_json() {
+    let json_body = br#"{"KeepAlive":true}"#;
+    let compressed =
+        zstd::stream::encode_all(&json_body[..], 0).expect("test payload should compress");
+    let size = u32::try_from(compressed.len()).expect("test payload fits u32");
+
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&size.to_le_bytes());
+    frame.extend_from_slice(&compressed);
 
     let resp = ControlClient::parse_map_response(&frame).expect("parse should succeed");
 
