@@ -16,7 +16,7 @@ use hamma_core::keys::{
 };
 use hamma_core::types::{
     AuthInfo, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse, Node, PeerChange,
-    RegisterRequest, RegisterResponse,
+    PeerRemoval, RegisterRequest, RegisterResponse,
 };
 
 #[test]
@@ -152,6 +152,20 @@ fn peer_change_patch_type_is_public_api() {
     );
     assert_eq!(change.online, Some(false));
     assert_eq!(change.cap, Some(68));
+}
+
+#[test]
+fn peer_removal_type_is_public_api() {
+    let json = r#"{"PeersRemoved":[7,{"NodeID":8},"nodekey:legacy"]}"#;
+    let resp: MapResponse = serde_json::from_str(json).expect("PeersRemoved parses");
+    let removals = resp.peers_removed.expect("removals present");
+
+    assert_eq!(removals[0], PeerRemoval::NodeId(7));
+    assert_eq!(removals[1], PeerRemoval::NodeId(8));
+    assert_eq!(
+        removals[2],
+        PeerRemoval::NodeKey("nodekey:legacy".to_string())
+    );
 }
 
 #[test]

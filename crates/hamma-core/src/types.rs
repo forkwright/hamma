@@ -171,9 +171,9 @@ pub struct MapResponse {
     #[serde(rename = "PeersChangedPatch")]
     pub peers_changed_patch: Option<Vec<PeerChange>>,
 
-    /// Node key strings of peers that were removed.
+    /// Peers that were removed.
     #[serde(rename = "PeersRemoved")]
-    pub peers_removed: Option<Vec<String>>,
+    pub peers_removed: Option<Vec<PeerRemoval>>,
 
     /// DNS configuration for `MagicDNS` and split DNS.
     #[serde(rename = "DNSConfig")]
@@ -187,6 +187,42 @@ pub struct MapResponse {
     /// ignored.
     #[serde(rename = "KeepAlive")]
     pub keep_alive: Option<bool>,
+}
+
+/// Peer removal marker from [`MapResponse::peers_removed`].
+///
+/// Newer control servers identify removed peers by numeric node ID. The string
+/// variant preserves compatibility with older key-string frames.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "PeerRemovalWire")]
+pub enum PeerRemoval {
+    /// Server-assigned numeric node identifier.
+    NodeId(i64),
+
+    /// Node public key string, serialized as `"nodekey:hex..."`.
+    NodeKey(String),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PeerRemovalWire {
+    NodeId(i64),
+    NodeKey(String),
+    NodeIdObject {
+        #[serde(rename = "NodeID")]
+        node_id: i64,
+    },
+}
+
+impl From<PeerRemovalWire> for PeerRemoval {
+    fn from(value: PeerRemovalWire) -> Self {
+        match value {
+            PeerRemovalWire::NodeId(node_id) | PeerRemovalWire::NodeIdObject { node_id } => {
+                Self::NodeId(node_id)
+            }
+            PeerRemovalWire::NodeKey(key) => Self::NodeKey(key),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -579,5 +615,27 @@ mod tests {
         assert_eq!(patch[0].key_expiry.as_deref(), Some("2026-11-01T00:00:00Z"));
         assert_eq!(patch[0].cap, Some(68));
         assert!(patch[0].cap_map.is_some());
+    }
+
+    #[test]
+    fn map_response_deserializes_peer_removals_by_node_id_and_key() {
+        let json = r#"{
+            "PeersRemoved": [
+                67890,
+                {"NodeID": 67891},
+                "nodekey:legacy"
+            ]
+        }"#;
+
+        let resp: MapResponse = serde_json::from_str(json).expect("removal frame should parse");
+        let removals = resp.peers_removed.expect("removals should be present");
+
+        assert_eq!(removals.len(), 3);
+        assert_eq!(removals[0], PeerRemoval::NodeId(67890));
+        assert_eq!(removals[1], PeerRemoval::NodeId(67891));
+        assert_eq!(
+            removals[2],
+            PeerRemoval::NodeKey("nodekey:legacy".to_string())
+        );
     }
 }
