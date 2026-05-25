@@ -27,6 +27,7 @@ use snafu::{ResultExt, Snafu};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
+use tracing::debug;
 
 use crate::noise::NoiseHandshake;
 use crate::transport::ControlConnection;
@@ -197,7 +198,18 @@ impl AsyncControlStream {
                 }
             },
         })?;
+        debug!(
+            target: "dictyon::wire",
+            payload_len = payload.len(),
+            frame_len = frame.len(),
+            "writing control message frame",
+        );
         self.stream.write_all(&frame).await.context(TlsSnafu)?;
+        debug!(
+            target: "dictyon::wire",
+            frame_len = frame.len(),
+            "control message frame written",
+        );
         Ok(())
     }
 
@@ -226,6 +238,11 @@ impl AsyncControlStream {
         }
 
         let body_len = usize::from(u16::from_be_bytes([len_hi, len_lo]));
+        debug!(
+            target: "dictyon::wire",
+            body_len,
+            "reading control message frame",
+        );
         let mut ciphertext = vec![0u8; body_len];
         self.stream
             .read_exact(&mut ciphertext)
@@ -243,6 +260,12 @@ impl AsyncControlStream {
                     }
                 },
             })?;
+        debug!(
+            target: "dictyon::wire",
+            ciphertext_len = body_len,
+            plaintext_len = plaintext.len(),
+            "control message frame decrypted",
+        );
         Ok(plaintext)
     }
 }
@@ -276,11 +299,23 @@ pub async fn fetch_server_key_with_config(
     cfg: &WireConfig,
 ) -> Result<MachinePublic, WireError> {
     let (host, port) = parse_host_port(control_url)?;
+    debug!(
+        target: "dictyon::wire",
+        host,
+        port,
+        "fetching control server key",
+    );
     let tls = build_tls_config();
     let connector = TlsConnector::from(Arc::new(tls));
 
     let addr = format!("{host}:{port}");
     let tcp = TcpStream::connect(&addr).await.context(TcpConnectSnafu)?;
+    debug!(
+        target: "dictyon::wire",
+        host,
+        port,
+        "tcp connection established for server key fetch",
+    );
 
     let server_name =
         rustls::pki_types::ServerName::try_from(host.as_str().to_owned()).map_err(|_| {
@@ -301,7 +336,13 @@ pub async fn fetch_server_key_with_config(
         .context(TlsSnafu)?;
 
     let response = read_full_response(&mut tls_stream, cfg).await?;
-    parse_server_key_response(&response)
+    let server_key = parse_server_key_response(&response)?;
+    debug!(
+        target: "dictyon::wire",
+        response_len = response.len(),
+        "control server key fetched",
+    );
+    Ok(server_key)
 }
 
 /// Connect to the control server, complete the Noise IK handshake, and
@@ -314,6 +355,10 @@ pub async fn fetch_server_key_with_config(
 ///
 /// Returns [`WireError`] on any I/O, TLS, HTTP, or Noise failure.
 pub async fn connect(config: &ControlConfig) -> Result<AsyncControlStream, WireError> {
+    debug!(
+        target: "dictyon::wire",
+        "connecting to control server",
+    );
     let server_key = fetch_server_key_with_config(&config.control_url, &config.config.wire).await?;
     connect_with_key(config, server_key).await
 }
@@ -331,6 +376,10 @@ pub async fn connect_with_tls(
     config: &ControlConfig,
     tls_config: ClientConfig,
 ) -> Result<AsyncControlStream, WireError> {
+    debug!(
+        target: "dictyon::wire",
+        "connecting to control server with caller tls config",
+    );
     let server_key = fetch_server_key_with_tls_and_config(
         &config.control_url,
         tls_config.clone(),
@@ -368,10 +417,22 @@ pub async fn fetch_server_key_with_tls_and_config(
     cfg: &WireConfig,
 ) -> Result<MachinePublic, WireError> {
     let (host, port) = parse_host_port(control_url)?;
+    debug!(
+        target: "dictyon::wire",
+        host,
+        port,
+        "fetching control server key with caller tls config",
+    );
     let connector = TlsConnector::from(Arc::new(tls_config));
 
     let addr = format!("{host}:{port}");
     let tcp = TcpStream::connect(&addr).await.context(TcpConnectSnafu)?;
+    debug!(
+        target: "dictyon::wire",
+        host,
+        port,
+        "tcp connection established for server key fetch",
+    );
 
     let server_name =
         rustls::pki_types::ServerName::try_from(host.as_str().to_owned()).map_err(|_| {
@@ -392,7 +453,13 @@ pub async fn fetch_server_key_with_tls_and_config(
         .context(TlsSnafu)?;
 
     let response = read_full_response(&mut tls_stream, cfg).await?;
-    parse_server_key_response(&response)
+    let server_key = parse_server_key_response(&response)?;
+    debug!(
+        target: "dictyon::wire",
+        response_len = response.len(),
+        "control server key fetched",
+    );
+    Ok(server_key)
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +481,12 @@ async fn connect_with_key_and_tls(
     tls_cfg: ClientConfig,
 ) -> Result<AsyncControlStream, WireError> {
     let (host, port) = parse_host_port(&config.control_url)?;
+    debug!(target: "dictyon::wire", host, port, "opening control wire connection");
     let connector = TlsConnector::from(Arc::new(tls_cfg));
 
     let addr = format!("{host}:{port}");
     let tcp = TcpStream::connect(&addr).await.context(TcpConnectSnafu)?;
+    debug!(target: "dictyon::wire", host, port, "tcp connection established for control wire");
 
     let server_name =
         rustls::pki_types::ServerName::try_from(host.as_str().to_owned()).map_err(|_| {
@@ -430,6 +499,7 @@ async fn connect_with_key_and_tls(
         .connect(server_name, tcp)
         .await
         .context(TlsSnafu)?;
+    debug!(target: "dictyon::wire", host, port, "tls connection established for control wire");
 
     // Build Noise initiation using the handshake/framing knobs.
     let machine_key_copy = MachinePrivate::from_bytes(*config.machine_key.as_bytes());
@@ -437,6 +507,11 @@ async fn connect_with_key_and_tls(
         NoiseHandshake::with_config(machine_key_copy, server_key, config.config.noise.clone());
     let init_msg = handshake.initiation_message()?;
     let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+    debug!(
+        target: "dictyon::wire",
+        initiation_len = init_msg.len(),
+        "noise initiation prepared",
+    );
 
     // Send HTTP upgrade request.
     let request = build_upgrade_request(&host, &init_b64);
@@ -444,6 +519,7 @@ async fn connect_with_key_and_tls(
         .write_all(request.as_bytes())
         .await
         .context(TlsSnafu)?;
+    debug!(target: "dictyon::wire", "noise upgrade request written");
 
     // Read HTTP headers; the Noise response frame follows in the stream.
     let (status_line, _) = read_upgrade_response(&mut tls_stream, &config.config.wire).await?;
@@ -451,10 +527,16 @@ async fn connect_with_key_and_tls(
     if !status_line.contains("101") {
         return Err(WireError::UnexpectedStatus { status_line });
     }
+    debug!(target: "dictyon::wire", "noise upgrade accepted");
 
     // Read the Noise response frame from the stream.
     // Frame format: [1B type=0x02][2B BE payload_len][noise_msg]
     let noise_body = read_noise_response_frame(&mut tls_stream).await?;
+    debug!(
+        target: "dictyon::wire",
+        response_len = noise_body.len(),
+        "noise response frame read",
+    );
 
     // Complete the Noise handshake.
     let conn = ControlConnection::complete_handshake(handshake, &noise_body).map_err(|e| {
@@ -467,6 +549,7 @@ async fn connect_with_key_and_tls(
             },
         }
     })?;
+    debug!(target: "dictyon::wire", "control wire connection established");
 
     Ok(AsyncControlStream {
         stream: tls_stream,

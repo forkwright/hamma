@@ -16,6 +16,7 @@
 
 use base64::Engine;
 use snafu::Snafu;
+use tracing::debug;
 
 use crate::noise::{NoiseError, NoiseHandshake, NoiseTransport};
 
@@ -79,6 +80,10 @@ impl ControlConnection {
     /// the Noise handshake. This is the constructor used after manually
     /// completing the handshake outside the HTTP upgrade flow.
     pub fn from_transport(noise: NoiseTransport) -> Self {
+        debug!(
+            target: "dictyon::transport",
+            "control connection created from noise transport",
+        );
         Self { noise }
     }
 
@@ -109,8 +114,10 @@ impl ControlConnection {
         }
 
         let init_msg = handshake.initiation_message()?;
+        let initiation_len = init_msg.len();
 
         let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+        let handshake_header_len = init_b64.len();
 
         let url = format!("{}{UPGRADE_PATH}", control_url.trim_end_matches('/'));
 
@@ -119,6 +126,13 @@ impl ControlConnection {
             ("Connection".to_string(), "Upgrade".to_string()),
             ("X-Tailscale-Handshake".to_string(), init_b64),
         ];
+
+        debug!(
+            target: "dictyon::transport",
+            initiation_len,
+            handshake_header_len,
+            "built noise upgrade request",
+        );
 
         Ok(UpgradeRequest { url, headers })
     }
@@ -139,7 +153,16 @@ impl ControlConnection {
         handshake: NoiseHandshake,
         response_body: &[u8],
     ) -> Result<Self, TransportError> {
+        debug!(
+            target: "dictyon::transport",
+            response_len = response_body.len(),
+            "completing noise handshake",
+        );
         let noise = handshake.process_response(response_body)?;
+        debug!(
+            target: "dictyon::transport",
+            "noise handshake complete",
+        );
         Ok(Self { noise })
     }
 
@@ -151,7 +174,17 @@ impl ControlConnection {
     ///
     /// Returns [`TransportError::Noise`] if encryption fails.
     pub fn send(&mut self, payload: &[u8]) -> Result<Vec<u8>, TransportError> {
+        debug!(
+            target: "dictyon::transport",
+            payload_len = payload.len(),
+            "encrypting control payload",
+        );
         let frame = self.noise.encrypt(payload)?;
+        debug!(
+            target: "dictyon::transport",
+            frame_len = frame.len(),
+            "control payload encrypted",
+        );
         Ok(frame)
     }
 
@@ -165,7 +198,17 @@ impl ControlConnection {
     ///
     /// Returns [`TransportError::Noise`] if decryption fails.
     pub fn receive(&mut self, data: &[u8]) -> Result<Vec<u8>, TransportError> {
+        debug!(
+            target: "dictyon::transport",
+            ciphertext_len = data.len(),
+            "decrypting control payload",
+        );
         let plaintext = self.noise.decrypt(data)?;
+        debug!(
+            target: "dictyon::transport",
+            plaintext_len = plaintext.len(),
+            "control payload decrypted",
+        );
         Ok(plaintext)
     }
 }
