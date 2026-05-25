@@ -145,9 +145,10 @@ pub struct MapRequest {
 /// A response frame from the `/machine/map` streaming endpoint.
 ///
 /// The first response contains the full network map (`node` + `peers`).
-/// Subsequent responses are deltas: `peers_changed` and/or
-/// `peers_removed` indicate incremental updates. If `keep_alive` is
-/// `true`, all other fields should be ignored (liveness probe).
+/// Subsequent responses are deltas: `peers_changed`, `peers_removed`,
+/// and/or `peers_changed_patch` indicate incremental updates. If
+/// `keep_alive` is `true`, all other fields should be ignored (liveness
+/// probe).
 #[derive(Debug, Deserialize)]
 pub struct MapResponse {
     /// This node's own information. `None` means unchanged from the
@@ -162,6 +163,13 @@ pub struct MapResponse {
     /// Peers that were added or changed since the last response.
     #[serde(rename = "PeersChanged")]
     pub peers_changed: Option<Vec<Node>>,
+
+    /// Lightweight peer mutations sent instead of full [`Node`] records.
+    ///
+    /// Parsing these keeps the wire type aligned with newer control servers;
+    /// application semantics live in the control client.
+    #[serde(rename = "PeersChangedPatch")]
+    pub peers_changed_patch: Option<Vec<PeerChange>>,
 
     /// Node key strings of peers that were removed.
     #[serde(rename = "PeersRemoved")]
@@ -195,14 +203,30 @@ pub struct Node {
     #[serde(rename = "ID")]
     pub id: i64,
 
+    /// Stable cross-process node identifier, when sent by the control plane.
+    #[serde(rename = "StableID", skip_serializing_if = "Option::is_none")]
+    pub stable_id: Option<String>,
+
     /// The node's public key, serialized as `"nodekey:hex..."`. Public
     /// identifier, not a secret.
     #[serde(rename = "Key")]
     pub key: String, // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
 
+    /// The node's machine public key, serialized as `"mkey:hex..."`.
+    #[serde(rename = "Machine", skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+
     /// The node's FQDN (trailing dot in Tailscale convention).
     #[serde(rename = "Name")]
     pub name: String,
+
+    /// Capability version advertised for this node.
+    #[serde(rename = "Cap", skip_serializing_if = "Option::is_none")]
+    pub cap: Option<u64>,
+
+    /// ACL tags applied to this node.
+    #[serde(rename = "Tags", skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 
     /// Assigned IP addresses in CIDR notation (e.g. `"100.64.0.1/32"`).
     #[serde(rename = "Addresses")]
@@ -225,10 +249,66 @@ pub struct Node {
     #[serde(rename = "DiscoKey", skip_serializing_if = "Option::is_none")]
     pub disco_key: Option<String>,
 
+    /// ISO 8601 expiry timestamp for the node key.
+    #[serde(rename = "KeyExpiry", skip_serializing_if = "Option::is_none")]
+    pub key_expiry: Option<String>,
+
+    /// ISO 8601 timestamp for the last time this node was seen online.
+    #[serde(rename = "LastSeen", skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<String>,
+
     /// Whether the node is currently online according to the control
     /// server.
     #[serde(rename = "Online", skip_serializing_if = "Option::is_none")]
     pub online: Option<bool>,
+}
+
+/// Lightweight mutation for one peer in [`MapResponse::peers_changed_patch`].
+///
+/// The control server sends these after a full map to avoid resending an
+/// entire [`Node`] when only endpoint, key, capability, or presence metadata
+/// changed.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PeerChange {
+    /// Server-assigned numeric identifier of the peer being mutated.
+    #[serde(rename = "NodeID")]
+    pub node_id: i64,
+
+    /// Updated DERP home region ID.
+    #[serde(rename = "DERPRegion", skip_serializing_if = "Option::is_none")]
+    pub derp_region: Option<i64>,
+
+    /// Updated capability version for this peer.
+    #[serde(rename = "Cap", skip_serializing_if = "Option::is_none")]
+    pub cap: Option<u64>,
+
+    /// Opaque capability map until hamma-core has a typed capability model.
+    #[serde(rename = "CapMap", skip_serializing_if = "Option::is_none")]
+    pub cap_map: Option<serde_json::Value>,
+
+    /// Updated direct UDP endpoints.
+    #[serde(rename = "Endpoints", skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<Vec<String>>,
+
+    /// Updated node public key.
+    #[serde(rename = "Key", skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>, // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
+
+    /// Updated disco public key.
+    #[serde(rename = "DiscoKey", skip_serializing_if = "Option::is_none")]
+    pub disco_key: Option<String>,
+
+    /// Updated online status.
+    #[serde(rename = "Online", skip_serializing_if = "Option::is_none")]
+    pub online: Option<bool>,
+
+    /// Updated last-seen timestamp.
+    #[serde(rename = "LastSeen", skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<String>,
+
+    /// Updated node-key expiry timestamp.
+    #[serde(rename = "KeyExpiry", skip_serializing_if = "Option::is_none")]
+    pub key_expiry: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -341,11 +421,17 @@ mod tests {
         let json = r#"{
             "Node": {
                 "ID": 12345,
+                "StableID": "node-12345",
                 "Key": "nodekey:self000",
+                "Machine": "mkey:machine000",
                 "Name": "myhost.tail1234.ts.net.",
+                "Cap": 68,
+                "Tags": ["tag:lab"],
                 "Addresses": ["100.64.0.1/32", "fd7a:115c:a1e0::1/128"],
                 "DERP": "127.3.3.40:1",
                 "DiscoKey": "discokey:abc123",
+                "KeyExpiry": "2026-11-01T00:00:00Z",
+                "LastSeen": "2026-05-25T09:00:00Z",
                 "Online": true
             },
             "Peers": [
@@ -374,10 +460,19 @@ mod tests {
 
         let node = resp.node.as_ref().expect("node should be present");
         assert_eq!(node.id, 12345);
+        assert_eq!(node.stable_id.as_deref(), Some("node-12345"));
         assert_eq!(node.key, "nodekey:self000");
+        assert_eq!(node.machine.as_deref(), Some("mkey:machine000"));
         assert_eq!(node.name, "myhost.tail1234.ts.net.");
+        assert_eq!(node.cap, Some(68));
+        assert_eq!(
+            node.tags.as_ref().expect("tags present"),
+            &["tag:lab".to_string()]
+        );
         assert_eq!(node.addresses.len(), 2);
         assert_eq!(node.derp.as_deref(), Some("127.3.3.40:1"));
+        assert_eq!(node.key_expiry.as_deref(), Some("2026-11-01T00:00:00Z"));
+        assert_eq!(node.last_seen.as_deref(), Some("2026-05-25T09:00:00Z"));
         assert_eq!(node.online, Some(true));
 
         let peers = resp.peers.as_ref().expect("peers should be present");
@@ -411,6 +506,7 @@ mod tests {
         assert!(resp.node.is_none());
         assert!(resp.peers.is_none());
         assert!(resp.peers_changed.is_none());
+        assert!(resp.peers_changed_patch.is_none());
         assert!(resp.peers_removed.is_none());
         assert!(resp.dns_config.is_none());
         assert!(resp.derp_map.is_none());
@@ -431,10 +527,57 @@ mod tests {
         assert_eq!(node.key, "nodekey:minimal");
         assert_eq!(node.name, "bare.example.ts.net.");
         assert_eq!(node.addresses, vec!["100.64.0.99/32"]);
+        assert!(node.stable_id.is_none());
+        assert!(node.machine.is_none());
+        assert!(node.cap.is_none());
+        assert!(node.tags.is_none());
         assert!(node.allowed_ips.is_none());
         assert!(node.endpoints.is_none());
         assert!(node.derp.is_none());
         assert!(node.disco_key.is_none());
+        assert!(node.key_expiry.is_none());
+        assert!(node.last_seen.is_none());
         assert!(node.online.is_none());
+    }
+
+    #[test]
+    fn map_response_deserializes_peer_changed_patch() {
+        let json = r#"{
+            "PeersChangedPatch": [
+                {
+                    "NodeID": 67890,
+                    "DERPRegion": 2,
+                    "Endpoints": ["1.2.3.4:41641"],
+                    "Key": "nodekey:peer001",
+                    "DiscoKey": "discokey:def456",
+                    "Online": true,
+                    "LastSeen": "2026-05-25T09:00:00Z",
+                    "KeyExpiry": "2026-11-01T00:00:00Z",
+                    "Cap": 68,
+                    "CapMap": {"https://tailscale.com/cap/is-admin": null}
+                }
+            ]
+        }"#;
+
+        let resp: MapResponse = serde_json::from_str(json).expect("patch frame should parse");
+        let patch = resp
+            .peers_changed_patch
+            .as_ref()
+            .expect("patch should be present");
+
+        assert_eq!(patch.len(), 1);
+        assert_eq!(patch[0].node_id, 67890);
+        assert_eq!(patch[0].derp_region, Some(2));
+        assert_eq!(
+            patch[0].endpoints.as_ref().expect("endpoints present")[0],
+            "1.2.3.4:41641"
+        );
+        assert_eq!(patch[0].key.as_deref(), Some("nodekey:peer001"));
+        assert_eq!(patch[0].disco_key.as_deref(), Some("discokey:def456"));
+        assert_eq!(patch[0].online, Some(true));
+        assert_eq!(patch[0].last_seen.as_deref(), Some("2026-05-25T09:00:00Z"));
+        assert_eq!(patch[0].key_expiry.as_deref(), Some("2026-11-01T00:00:00Z"));
+        assert_eq!(patch[0].cap, Some(68));
+        assert!(patch[0].cap_map.is_some());
     }
 }

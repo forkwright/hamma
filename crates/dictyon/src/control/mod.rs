@@ -363,13 +363,19 @@ impl ControlClient {
                 // First response: full initialization.
                 let self_node = resp.node.unwrap_or_else(|| Node {
                     id: 0,
+                    stable_id: None,
                     key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
+                    machine: None,
                     name: String::new(),
+                    cap: None,
+                    tags: None,
                     addresses: Vec::new(),
                     allowed_ips: None,
                     endpoints: None,
                     derp: None,
                     disco_key: None,
+                    key_expiry: None,
+                    last_seen: None,
                     online: None,
                 });
 
