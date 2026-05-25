@@ -17,6 +17,7 @@ use hamma_core::config::NoiseConfig;
 use hamma_core::keys::{MachinePrivate, MachinePublic};
 use snafu::Snafu;
 use snow::{Builder, HandshakeState, TransportState};
+use tracing::debug;
 
 // ---------------------------------------------------------------------------
 // Protocol-fixed constants (NOT parameterizable)
@@ -171,6 +172,10 @@ impl NoiseHandshake {
     /// Returns [`NoiseError::InvalidState`] if called more than once, or
     /// [`NoiseError::Snow`] if the snow library fails.
     pub fn initiation_message(&mut self) -> Result<Vec<u8>, NoiseError> {
+        debug!(
+            target: "dictyon::noise",
+            "generating noise initiation message",
+        );
         let (machine_key, server_public) =
             match core::mem::replace(&mut self.state, HandshakePhase::Completed) {
                 HandshakePhase::Ready {
@@ -216,6 +221,13 @@ impl NoiseHandshake {
             handshake: Box::new(handshake),
         };
 
+        debug!(
+            target: "dictyon::noise",
+            noise_len,
+            framed_len = framed.len(),
+            "noise initiation message generated",
+        );
+
         Ok(framed)
     }
 
@@ -229,6 +241,11 @@ impl NoiseHandshake {
     /// [`NoiseError::Snow`] / [`NoiseError::HandshakeFailed`] if the
     /// response is invalid.
     pub fn process_response(mut self, response: &[u8]) -> Result<NoiseTransport, NoiseError> {
+        debug!(
+            target: "dictyon::noise",
+            response_len = response.len(),
+            "processing noise response message",
+        );
         let config = self.config.clone();
         let mut handshake = match core::mem::replace(&mut self.state, HandshakePhase::Completed) {
             HandshakePhase::AwaitingResponse { handshake } => *handshake,
@@ -274,6 +291,12 @@ impl NoiseHandshake {
 
         let transport = handshake.into_transport_mode()?;
 
+        debug!(
+            target: "dictyon::noise",
+            payload_len,
+            "noise handshake response accepted",
+        );
+
         Ok(NoiseTransport { transport, config })
     }
 }
@@ -318,6 +341,14 @@ impl NoiseTransport {
         frame.extend_from_slice(&frame_len.to_be_bytes());
         frame.extend_from_slice(&ciphertext);
 
+        debug!(
+            target: "dictyon::noise",
+            plaintext_len = plaintext.len(),
+            ciphertext_len = ct_len,
+            frame_len = frame.len(),
+            "noise transport frame encrypted",
+        );
+
         Ok(frame)
     }
 
@@ -345,6 +376,13 @@ impl NoiseTransport {
                 message: format!("{e}"),
             })?;
         plaintext.truncate(pt_len);
+
+        debug!(
+            target: "dictyon::noise",
+            ciphertext_len = ciphertext.len(),
+            plaintext_len = pt_len,
+            "noise transport frame decrypted",
+        );
 
         Ok(plaintext)
     }
