@@ -23,6 +23,7 @@ use hamma_core::types::{
     RegisterRequest, RegisterResponse,
 };
 use snafu::Snafu;
+use tracing::debug;
 
 use crate::transport::ControlConnection;
 use crate::wire::AsyncControlStream;
@@ -202,6 +203,11 @@ impl ControlClient {
         stream: &mut AsyncControlStream,
         auth_key: Option<&str>,
     ) -> Result<RegisterOutcome, ControlError> {
+        debug!(
+            target: "dictyon::control",
+            has_auth_key = auth_key.is_some(),
+            "sending register request",
+        );
         let payload = self.build_register_request(auth_key)?;
         let framed = frame_message(&payload);
         stream.send_message(&framed).await?;
@@ -210,8 +216,18 @@ impl ControlClient {
         let resp = parse_register_response(&raw)?;
 
         if let Some(url) = resp.auth_url.clone() {
+            debug!(
+                target: "dictyon::control",
+                outcome = "needs_auth",
+                "register requires interactive auth",
+            );
             Ok(RegisterOutcome::NeedsAuth { auth_url: url })
         } else {
+            debug!(
+                target: "dictyon::control",
+                outcome = "authorized",
+                "register authorized",
+            );
             Ok(RegisterOutcome::Authorized(resp))
         }
     }
@@ -229,6 +245,11 @@ impl ControlClient {
         stream: &mut AsyncControlStream,
         followup_url: &str,
     ) -> Result<RegisterResponse, ControlError> {
+        debug!(
+            target: "dictyon::control",
+            followup_url,
+            "polling registration followup",
+        );
         let req = RegisterRequest {
             node_key: self.node_key.public_key().to_hex(),
             old_node_key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
@@ -257,6 +278,10 @@ impl ControlClient {
         &mut self,
         stream: &mut AsyncControlStream,
     ) -> Result<(), ControlError> {
+        debug!(
+            target: "dictyon::control",
+            "sending streaming map request",
+        );
         let payload = self.build_map_request()?;
         let framed = frame_message(&payload);
         stream.send_message(&framed).await?;
@@ -278,6 +303,11 @@ impl ControlClient {
         let raw = stream.recv_message().await?;
         let resp = Self::parse_map_response(&raw)?;
         let is_keepalive = resp.keep_alive == Some(true);
+        debug!(
+            target: "dictyon::control",
+            is_keepalive,
+            "received map update",
+        );
         self.apply_map_response(resp);
         Ok(is_keepalive)
     }
