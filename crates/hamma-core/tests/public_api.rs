@@ -15,7 +15,7 @@ use hamma_core::keys::{
     DiscoPrivate, DiscoPublic, KeyError, MachinePrivate, MachinePublic, NodePrivate, NodePublic,
 };
 use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse, Node,
+    AuthInfo, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse, Node, PeerChange,
     RegisterRequest, RegisterResponse,
 };
 
@@ -123,7 +123,35 @@ fn node_deserializes_minimal_fields() {
     let node: Node = serde_json::from_str(json).expect("minimal Node parses");
     assert_eq!(node.id, 7);
     assert_eq!(node.addresses, vec!["100.64.0.1/32"]);
+    assert!(node.stable_id.is_none());
+    assert!(node.machine.is_none());
+    assert!(node.cap.is_none());
+    assert!(node.tags.is_none());
     assert!(node.allowed_ips.is_none());
+    assert!(node.key_expiry.is_none());
+    assert!(node.last_seen.is_none());
+}
+
+#[test]
+fn peer_change_patch_type_is_public_api() {
+    let json = r#"{
+        "NodeID": 7,
+        "DERPRegion": 3,
+        "Endpoints": ["203.0.113.7:41641"],
+        "Online": false,
+        "Cap": 68
+    }"#;
+
+    let change: PeerChange = serde_json::from_str(json).expect("PeerChange parses");
+
+    assert_eq!(change.node_id, 7);
+    assert_eq!(change.derp_region, Some(3));
+    assert_eq!(
+        change.endpoints.as_ref().expect("endpoints present")[0],
+        "203.0.113.7:41641"
+    );
+    assert_eq!(change.online, Some(false));
+    assert_eq!(change.cap, Some(68));
 }
 
 #[test]
