@@ -9,7 +9,7 @@
 )]
 
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange};
+use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange, PeerRemoval};
 
 use super::*;
 
@@ -218,7 +218,7 @@ fn apply_map_response_removes_peers() {
         peers: None,
         peers_changed: None,
         peers_changed_patch: None,
-        peers_removed: Some(vec!["nodekey:peer2".to_string()]),
+        peers_removed: Some(vec![PeerRemoval::NodeKey("nodekey:peer2".to_string())]),
         dns_config: None,
         derp_map: None,
         keep_alive: None,
@@ -228,6 +228,43 @@ fn apply_map_response_removes_peers() {
     assert_eq!(client.peers().len(), 2);
     assert_eq!(client.peers()[0].key, "nodekey:peer1");
     assert_eq!(client.peers()[1].key, "nodekey:peer3");
+}
+
+#[test]
+fn apply_map_response_removes_peers_by_node_id() {
+    let mut client = paired_client();
+
+    let initial = MapResponse {
+        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
+        peers: Some(vec![
+            sample_node(2, "nodekey:peer1", "peer1.ts.net."),
+            sample_node(3, "nodekey:peer2", "peer2.ts.net."),
+            sample_node(4, "nodekey:peer3", "peer3.ts.net."),
+        ]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(initial);
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: Some(vec![PeerRemoval::NodeId(3)]),
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(delta);
+
+    assert_eq!(client.peers().len(), 2);
+    assert_eq!(client.peers()[0].id, 2);
+    assert_eq!(client.peers()[1].id, 4);
 }
 
 #[test]
@@ -499,8 +536,11 @@ proptest::proptest! {
 
         // Remove up to n_remove of the original peers.
         let n_to_remove = n_remove.min(n_initial);
-        let removed_keys: Vec<String> = (0..n_to_remove)
-            .map(|i| format!("nodekey:peer{i}"))
+        let removed_keys: Vec<String> = (0..n_to_remove).map(|i| format!("nodekey:peer{i}")).collect();
+        let removals: Vec<PeerRemoval> = removed_keys
+            .iter()
+            .cloned()
+            .map(PeerRemoval::NodeKey)
             .collect();
 
         if n_to_remove > 0 {
@@ -509,7 +549,7 @@ proptest::proptest! {
                 peers: None,
                 peers_changed: None,
                 peers_changed_patch: None,
-                peers_removed: Some(removed_keys.clone()),
+                peers_removed: Some(removals),
                 dns_config: None,
                 derp_map: None,
                 keep_alive: None,
