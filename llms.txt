@@ -22,3 +22,4 @@ Structured LLM corpus:
 - [CLAUDE.md](CLAUDE.md): repo conventions and build/test rules
 - [Cargo.toml](Cargo.toml): current workspace members
 - [standards/](standards/): kanon-synced standards
+- [AGENTS.md](AGENTS.md): agent orientation, build commands, key patterns, PR checklist
