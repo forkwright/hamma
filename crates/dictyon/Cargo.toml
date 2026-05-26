@@ -24,7 +24,7 @@ zstd = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 rcgen = "0.13"
-tracing-subscriber = { workspace = true }
+koinon = { workspace = true }
 
 [lints]
 workspace = true

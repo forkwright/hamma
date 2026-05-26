@@ -16,6 +16,7 @@ use dictyon::wire::{AsyncControlStream, ControlConfig, WireError, connect};
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
+use koinon::telemetry;
 
 const CONTROL_URL: &str = "https://controlplane.tailscale.com";
 
@@ -24,12 +25,6 @@ const CONTROL_URL: &str = "https://controlplane.tailscale.com";
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
 enum ExampleError {
-    /// Failed to configure the tracing filter directive.
-    #[snafu(display("tracing filter init: {message}"))]
-    TracingInit {
-        /// Description of the tracing init failure.
-        message: String,
-    },
     /// Wire-level error (TLS / HTTP upgrade / transport framing).
     #[snafu(display("wire layer: {source}"))]
     Wire {
@@ -89,18 +84,7 @@ impl From<TransportError> for ExampleError {
 
 #[tokio::main]
 async fn main() -> Result<(), ExampleError> {
-    let directive =
-        "dictyon=debug"
-            .parse()
-            .map_err(
-                |e: tracing_subscriber::filter::ParseError| ExampleError::TracingInit {
-                    message: e.to_string(),
-                },
-            )?;
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive(directive))
-        .init();
-
+    telemetry::init("dictyon=debug");
     run().await
 }
 
