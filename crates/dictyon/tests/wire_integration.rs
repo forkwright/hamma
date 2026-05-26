@@ -84,10 +84,10 @@ async fn read_http_headers(
 /// Extract the value of an HTTP header from a raw header block.
 fn extract_header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
     for line in headers.lines() {
-        if let Some(rest) = line.strip_prefix(name) {
-            if let Some(value) = rest.strip_prefix(": ") {
-                return Some(value.trim());
-            }
+        if let Some(rest) = line.strip_prefix(name)
+            && let Some(value) = rest.strip_prefix(": ")
+        {
+            return Some(value.trim());
         }
     }
     None
