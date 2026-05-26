@@ -200,6 +200,9 @@ pub struct MapResponse {
 ///
 /// Newer control servers identify removed peers by numeric node ID. The string
 /// variant preserves compatibility with older key-string frames.
+// WHY: variant names match Tailscale control-protocol wire identifiers;
+// renaming would diverge from protocol documentation and break serde mappings.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "PeerRemovalWire")]
 pub enum PeerRemoval {
@@ -210,6 +213,8 @@ pub enum PeerRemoval {
     NodeKey(String),
 }
 
+// WHY: variant names mirror the public PeerRemoval wire identifiers for serde symmetry.
+#[allow(clippy::enum_variant_names)]
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum PeerRemovalWire {
