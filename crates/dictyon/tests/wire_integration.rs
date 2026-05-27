@@ -4,9 +4,6 @@
 //! generated at test time via rcgen) and exercise the full protocol
 //! flow: key fetch → Noise handshake → register → map.
 
-#![allow(clippy::expect_used)]
-#![allow(clippy::unwrap_used)]
-
 use std::sync::Arc;
 
 use base64::Engine;
@@ -34,6 +31,10 @@ const NOISE_PROLOGUE: &[u8] = b"Tailscale Control Protocol v1";
 
 /// Generate a self-signed certificate for `127.0.0.1` and return:
 /// - `(ServerConfig, ClientConfig)` pair where the client trusts the cert.
+#[expect(
+    clippy::expect_used,
+    reason = "test TLS setup should fail immediately when fixture construction breaks"
+)]
 fn make_test_tls_pair() -> (rustls::ServerConfig, rustls::ClientConfig) {
     let cert_key = generate_simple_self_signed(vec!["127.0.0.1".to_string()])
         .expect("generate_simple_self_signed should succeed");
@@ -65,6 +66,10 @@ fn make_test_tls_pair() -> (rustls::ServerConfig, rustls::ClientConfig) {
 /// Read from `stream` byte by byte until `\r\n\r\n` is seen.
 ///
 /// Returns the full buffer including the terminator.
+#[expect(
+    clippy::expect_used,
+    reason = "integration test helper should fail immediately on mock transport errors"
+)]
 async fn read_http_headers(
     stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
 ) -> Vec<u8> {
@@ -97,6 +102,10 @@ fn extract_header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
 /// `X-Tailscale-Handshake` header value.
 ///
 /// Wire format: `[2B version LE][1B type=0x01][2B payload_len BE][noise_msg]`
+#[expect(
+    clippy::expect_used,
+    reason = "integration test helper should fail immediately on malformed mock handshakes"
+)]
 fn decode_handshake_header(b64: &str) -> Vec<u8> {
     let framed = base64::engine::general_purpose::STANDARD
         .decode(b64)
@@ -108,6 +117,10 @@ fn decode_handshake_header(b64: &str) -> Vec<u8> {
 }
 
 /// Frame a Noise response message as `[1B type=0x02][2B BE len][msg]`.
+#[expect(
+    clippy::expect_used,
+    reason = "test Noise fixtures fit the protocol frame size by construction"
+)]
 fn frame_noise_response(noise_msg: &[u8]) -> Vec<u8> {
     let mut framed = Vec::with_capacity(3 + noise_msg.len());
     framed.push(MSG_TYPE_RESPONSE);
@@ -119,6 +132,10 @@ fn frame_noise_response(noise_msg: &[u8]) -> Vec<u8> {
 
 /// Read a single Noise transport frame from `stream`:
 /// `[1B type=0x04][2B BE len][ciphertext]`.
+#[expect(
+    clippy::expect_used,
+    reason = "integration test helper should fail immediately on mock transport errors"
+)]
 async fn read_noise_frame(
     stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
 ) -> Vec<u8> {
@@ -138,6 +155,10 @@ async fn read_noise_frame(
 }
 
 /// Write a Noise transport frame to `stream`.
+#[expect(
+    clippy::expect_used,
+    reason = "integration test helper should fail immediately on mock transport errors"
+)]
 async fn write_noise_frame(
     stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
     transport: &mut snow::TransportState,
@@ -186,6 +207,10 @@ impl MockServerKeys {
 ///
 /// Reads the GET request, responds with the server's Noise public key JSON,
 /// then closes the connection.
+#[expect(
+    clippy::expect_used,
+    reason = "mock server test helper should fail immediately on invalid requests or I/O errors"
+)]
 async fn handle_key_request(
     stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
     keys: &MockServerKeys,
@@ -214,6 +239,10 @@ async fn handle_key_request(
 /// Run the mock server's `/ts2021` upgrade + Noise handshake handler.
 ///
 /// Returns the paired `snow::TransportState` for subsequent message I/O.
+#[expect(
+    clippy::expect_used,
+    reason = "mock server test helper should fail immediately on invalid handshake fixtures"
+)]
 async fn handle_noise_upgrade(
     stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
     keys: &MockServerKeys,
@@ -276,6 +305,10 @@ async fn handle_noise_upgrade(
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+#[expect(
+    clippy::expect_used,
+    reason = "integration tests use expect to keep fixture failures explicit"
+)]
 async fn connects_and_completes_noise_handshake() {
     let (server_tls_cfg, client_tls_cfg) = make_test_tls_pair();
     let keys = Arc::new(MockServerKeys::generate());
@@ -312,6 +345,10 @@ async fn connects_and_completes_noise_handshake() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::expect_used,
+    reason = "integration tests use expect to keep fixture failures explicit"
+)]
 async fn fetch_server_key_parses_response() {
     let (server_tls_cfg, client_tls_cfg) = make_test_tls_pair();
     let keys = Arc::new(MockServerKeys::generate());
@@ -345,6 +382,10 @@ async fn fetch_server_key_parses_response() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::expect_used,
+    reason = "integration tests use expect to keep fixture failures explicit"
+)]
 async fn register_returns_authorized_with_preauth_key() {
     let (server_tls_cfg, client_tls_cfg) = make_test_tls_pair();
     let keys = Arc::new(MockServerKeys::generate());
@@ -427,6 +468,10 @@ async fn register_returns_authorized_with_preauth_key() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::expect_used,
+    reason = "integration tests use expect to keep fixture failures explicit"
+)]
 async fn map_stream_receives_compressed_full_map_after_register() {
     let (server_tls_cfg, client_tls_cfg) = make_test_tls_pair();
     let keys = Arc::new(MockServerKeys::generate());
@@ -523,6 +568,10 @@ async fn connection_to_unreachable_host_returns_error() {
 
 /// Build a dummy (but valid) `ControlConnection` for tests that need
 /// a `ControlClient` but only use the stream-based API.
+#[expect(
+    clippy::expect_used,
+    reason = "test Noise fixture construction should fail immediately if invariants break"
+)]
 fn make_dummy_transport() -> (dictyon::transport::ControlConnection, ()) {
     let machine_key = MachinePrivate::generate();
     let server_key = MachinePrivate::generate();
@@ -570,6 +619,10 @@ fn make_dummy_transport() -> (dictyon::transport::ControlConnection, ()) {
     (conn, ())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "mock server test helper should fail immediately on invalid request frames"
+)]
 async fn handle_register_and_map_stream(
     stream: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
     transport: &mut snow::TransportState,
@@ -621,6 +674,10 @@ fn control_payload<'a>(plaintext: &'a [u8], label: &str) -> &'a [u8] {
     &plaintext[4..4 + payload_len]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test control payloads fit the protocol frame size by construction"
+)]
 fn frame_control_payload(payload: &[u8]) -> Vec<u8> {
     let payload_len = u32::try_from(payload.len()).expect("control payload fits u32");
     let mut frame = Vec::with_capacity(4 + payload.len());
