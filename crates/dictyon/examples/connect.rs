@@ -14,9 +14,9 @@ use dictyon::noise::{NoiseError, NoiseHandshake};
 use dictyon::transport::{ControlConnection, TransportError};
 use dictyon::wire::{AsyncControlStream, ControlConfig, WireError, connect};
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use koinon::telemetry;
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
-use koinon::telemetry;
 
 const CONTROL_URL: &str = "https://controlplane.tailscale.com";
 

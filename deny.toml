@@ -53,3 +53,6 @@ skip = [
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# WHY: dictyon's example tracing initialization is delegated to koinon,
+# forkwright's shared fleet scaffolding crate.
+allow-git = ["https://github.com/forkwright/koinon"]
