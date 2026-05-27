@@ -9,7 +9,6 @@
 
 use core::fmt;
 
-use rand::rngs::OsRng;
 use snafu::Snafu;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -89,7 +88,7 @@ macro_rules! key_pair {
             /// Generate a new random private key.
             #[must_use]
             pub fn generate() -> Self {
-                let secret = StaticSecret::random_from_rng(OsRng);
+                let secret = StaticSecret::from(rand::random::<[u8; KEY_LEN]>());
                 Self(secret.to_bytes())
             }
 
