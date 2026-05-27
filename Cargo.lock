@@ -235,7 +235,6 @@ dependencies = [
  "proptest",
  "rcgen",
  "rustls",
- "serde",
  "serde_json",
  "snafu",
  "snow",
@@ -244,7 +243,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "webpki-roots",
- "zeroize",
  "zstd",
 ]
 
