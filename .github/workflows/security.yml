@@ -95,4 +95,4 @@ jobs:
             echo "ERROR: downloaded binary version mismatch" >&2; exit 1; }
           echo "/tmp" >> "$GITHUB_PATH"
       - name: osv scanner
-        run: osv-scanner scan source --lockfile=Cargo.lock
+        run: osv-scanner scan source --config=osv-scanner.toml --lockfile=Cargo.lock
