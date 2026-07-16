@@ -3,25 +3,9 @@ targets = []
 all-features = false
 
 [advisories]
-
 # WHY: keep in sync with .cargo/audit.toml's [advisories.ignore] array.
 # cargo-audit does not read deny.toml, so any ignore lives in both files.
-
-[[advisories.ignore]]
-id = "RUSTSEC-2025-0141"
-reason = "bincode 1.x unmaintained — used directly by kanon storage codec (index + treesitter cache) and transitively via syntect. No safe upgrade: bincode 2.x is a breaking-change rewrite and syntect has not migrated."
-
-[[advisories.ignore]]
-id = "RUSTSEC-2024-0436"
-reason = "paste unmaintained, transitive via tokenizers (logismos → mnemosyne); no safe upgrade available upstream."
-
-[[advisories.ignore]]
-id = "RUSTSEC-2020-0128"
-reason = "False positive: name+version collision. The flagged `cache 0.0.0` is logismos's internal KV-cache crate (publish = false, path dep), not the abandoned crates.io `cache` crate the 2020 advisory covers."
-
-[[advisories.ignore]]
-id = "RUSTSEC-2021-0006"
-reason = "False positive: same collision as RUSTSEC-2020-0128. The flagged `cache 0.0.0` is logismos's internal KV-cache crate, unrelated to the 2021 advisory's raw-pointer footgun in the abandoned crates.io crate."
+ignore = []
 
 [licenses]
 # WHY: license allow list mirrors aletheia's deny.toml. Each addition over
