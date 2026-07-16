@@ -1,0 +1,5 @@
+# Documented exceptions for ORCHESTRATION/main-worktree-commit-prohibited.
+# Format: "<40-hex-sha>" = "<one-line justification>" — justification required.
+
+[main_worktree_commit]
+94a77ebb2a38a031c21b57c411a65e7e5509a628 = "T0 operator-session lockfile-only security fix (RUSTSEC-2026-0190, #56) authored during the 2026-07 boxless window before the worktree convention was re-established on metis; follow-ups on this branch are worktree-authored."

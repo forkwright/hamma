@@ -1,0 +1,112 @@
+[baseline]
+created = "2026-07-16"
+remove_after = "2026-08-13"
+reason = "hamma#57 lint-debt burn-down — entries deleted as each family clears; expiry enforces completion (expired non-empty baseline fails the gate)"
+
+[[baseline.entry]]
+rule = "CI/release-yml-missing-attestation"
+file = ".github/workflows/release-please.yml"
+line = 1
+hash = "b525087c2878d94b7bcb773fc6795d4e90b36c64bb32ad2ec421a37935890fb1"
+
+[[baseline.entry]]
+rule = "CONTEXT/preamble-required"
+file = "AGENTS.md"
+line = 1
+hash = "7f93f2a8274fa8ea007a3fcafe1376f4dec91decde6fce4b61695e99e39ee45a"
+
+[[baseline.entry]]
+rule = "ARCH/substrate-floating-ref"
+file = "Cargo.toml"
+line = 45
+hash = "3dd3f935ad12dd2617be05cb4d987a4868a14b93073115dbb080d92597eda6bb"
+
+[[baseline.entry]]
+rule = "TOPOLOGY/shallow-struct"
+file = "crates/dictyon/src/control/mod.rs"
+line = 106
+hash = "8dd305634c82286c46a4f8874850c916ab787219f6a50d2ab8fad418a1c43b2f"
+
+[[baseline.entry]]
+rule = "COMMENTS/deflection-without-tracking"
+file = "crates/dictyon/src/lib.rs"
+line = 25
+hash = "35596161772a6c47623b698d0e511382bf4b82bd12988281f0da36817e51672a"
+
+[[baseline.entry]]
+rule = "RUST/file-too-long"
+file = "crates/dictyon/src/wire.rs"
+line = 1
+hash = "88dd9c77208afc8e0f1efc6fbb0b11e6976ac2e5ee44f299151ea39fa0e2ec69"
+
+[[baseline.entry]]
+rule = "RUST/indexing-slicing"
+file = "crates/dictyon/src/wire.rs"
+line = 767
+hash = "042372e88aaac09d1462bf65371311633e7fe0f34fe50155e9f980545d0f2f5b"
+
+[[baseline.entry]]
+rule = "NAMING/no-owner-prefix"
+file = "crates/hamma-core/Cargo.toml"
+line = 1
+hash = "70acf00586aa7b90c3866278505be7b81fb7ee1f7e21c17c1a22ac239be3c72a"
+
+[[baseline.entry]]
+rule = "RUST/no-silent-result-swallow"
+file = "crates/hamma-core/src/keys.rs"
+line = 232
+hash = "d1416ac2d86b612a4585758a52e83d66a15450d7f58243b77b7d088f687b2d55"
+
+[[baseline.entry]]
+rule = "RUST/no-debug-derive-on-public-types"
+file = "crates/hamma-core/src/types.rs"
+line = 22
+hash = "cee9dd419270689ca45bb95a3dd9f766668fcdfb51d1b034b66732ec0038b759"
+
+[[baseline.entry]]
+rule = "COMMENTS/deflection-without-tracking"
+file = "crates/hamma-core/src/types.rs"
+line = 47
+hash = "975cca2afd4f9e1de126155160c6e9ab21c46761d7343be0434f9267af5e5ca2"
+
+[[baseline.entry]]
+rule = "RUST/primitive-for-domain-id"
+file = "crates/hamma-core/src/types.rs"
+line = 69
+hash = "3c90a99f16298b2da25f6da7d64694a68fadc112b8327efa26011de8fe271eeb"
+
+[[baseline.entry]]
+rule = "RUST/no-debug-derive-on-public-types"
+file = "crates/hamma-core/src/types.rs"
+line = 111
+hash = "cee9dd419270689ca45bb95a3dd9f766668fcdfb51d1b034b66732ec0038b759"
+
+[[baseline.entry]]
+rule = "RUST/allow-not-expect"
+file = "crates/hamma-core/src/types.rs"
+line = 205
+hash = "0658fa78601251d1573deba75582c9589bcbc36324981ec0bca0a4e9a97c4c1f"
+
+[[baseline.entry]]
+rule = "RUST/non-exhaustive-enum"
+file = "crates/hamma-core/src/types.rs"
+line = 211
+hash = "b768832c348cb2cd9c5b56a6f7617ab8cecc5979f67ad1accc4f84ab29d70561"
+
+[[baseline.entry]]
+rule = "RUST/no-debug-derive-on-public-types"
+file = "crates/hamma-core/src/types.rs"
+line = 254
+hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
+
+[[baseline.entry]]
+rule = "RUST/no-debug-derive-on-public-types"
+file = "crates/hamma-core/src/types.rs"
+line = 325
+hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
+
+[[baseline.entry]]
+rule = "RUST/config-deny-unknown-fields"
+file = "crates/hamma-core/src/types.rs"
+line = 376
+hash = "90da8fc2c28fcb56dab7204cd818fa0ac787eaec8ae856c885e8f2d6fedaa459"
