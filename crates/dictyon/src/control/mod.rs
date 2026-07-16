@@ -130,10 +130,13 @@ pub struct Netmap {
 pub struct ControlClient {
     #[expect(
         dead_code,
-        reason = "transport reserved for synchronous API, not yet wired"
+        reason = "transport reserved for synchronous API, not yet wired (#57)"
     )]
     transport: ControlConnection,
-    #[expect(dead_code, reason = "machine_key reserved for future rotation logic")]
+    #[expect(
+        dead_code,
+        reason = "machine_key reserved for future rotation logic (#57)"
+    )]
     machine_key: MachinePrivate,
     node_key: NodePrivate,
     disco_key: DiscoPrivate,

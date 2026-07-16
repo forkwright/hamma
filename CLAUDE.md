@@ -105,3 +105,27 @@ Conventional commits: `type(scope): description`. Types: `feat`, `fix`, `refacto
 One logical change per commit. Rebase before pushing to keep history linear.
 
 Never commit directly to main once branch protection is set up. Never push to any upstream that isn't `origin`.
+
+<!-- kanon:auto-start -->
+## Generated kanon context
+
+- Registry name: `hamma`
+- Forge repo: `forkwright/hamma`
+- Kanon prefix: `ha`
+- Config source: `workflow/kanon.toml [projects.hamma]`
+- Standards source: `crates/basanos/standards/STANDARDS.md`
+- MCP routing catalog: `workflow/AGENTS-mcp-tools.md`
+
+Run `kanon docs sync --check --repo hamma` to verify this generated
+section and `kanon docs sync --apply --repo hamma` to refresh it.
+
+## Blast zone
+
+- Paths explicitly named by the rendered prompt, role, or template input.
+
+## Acceptance verifier
+
+```bash
+kanon gate
+```
+<!-- kanon:auto-end -->

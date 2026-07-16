@@ -51,3 +51,28 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 ## Contributing
 
 Not yet accepting external contributions while the initial architecture stabilizes. Watch the repo for status updates.
+
+<!-- kanon:auto-start -->
+## Repository Metadata
+
+- Registry name: `hamma`
+- Description: Kanon-managed forkwright repository `hamma`.
+- Forge repo: `forkwright/hamma`
+- Kanon prefix: `ha`
+- Config source: `workflow/kanon.toml [projects.hamma]`
+- Planning state: `projects/hamma/STATE.md`
+- Last state update: `2026-05-22`
+
+Run `kanon docs sync --check --repo hamma` to verify this generated
+section and `kanon docs sync --apply --repo hamma` to refresh it.
+
+## Blast zone
+
+- Paths explicitly named by the rendered prompt, role, or template input.
+
+## Acceptance verifier
+
+```bash
+kanon gate
+```
+<!-- kanon:auto-end -->
