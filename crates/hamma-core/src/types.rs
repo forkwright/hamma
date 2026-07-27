@@ -282,7 +282,7 @@ pub struct Node {
     #[serde(rename = "Tags", skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 
-    /// Assigned IP addresses in CIDR notation (e.g. `"100.64.0.1/32"`).
+    /// Assigned IP addresses in CIDR notation (Tailscale CGNAT range, RFC 6598).
     #[serde(rename = "Addresses")]
     pub addresses: Vec<String>,
 
@@ -386,7 +386,7 @@ pub struct DnsConfig {
 /// A single DNS resolver entry.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DnsResolver {
-    /// Resolver address (e.g. `"1.1.1.1:53"` or `"100.100.100.100"`).
+    /// Resolver address (e.g. `"1.1.1.1:53"` for a public DNS server, or the `MagicDNS` resolver).
     #[serde(rename = "Addr")]
     pub addr: String,
 }
