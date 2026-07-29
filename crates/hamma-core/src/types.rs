@@ -283,7 +283,15 @@ pub struct Node {
     pub tags: Option<Vec<String>>,
 
     /// Assigned IP addresses in CIDR notation (Tailscale CGNAT range, RFC 6598).
-    #[serde(rename = "Addresses")]
+    ///
+    /// WHY(#54) `default`: a node the control plane has not yet assigned
+    /// addresses to — a freshly registered peer, or any Tailscale-compatible
+    /// server that omits an empty list — sends no `Addresses` key at all.
+    /// Without a default that omission is a missing-field error, and because
+    /// peers are decoded as part of one `MapResponse`, a single address-less
+    /// peer fails the whole map update. Absent and empty mean the same thing
+    /// here, so they decode the same way.
+    #[serde(rename = "Addresses", default)]
     pub addresses: Vec<String>,
 
     /// Routable CIDRs for this node (may include subnet routes).
@@ -419,6 +427,33 @@ pub struct DerpMap {
 )]
 mod tests {
     use super::*;
+
+    /// WHY(#54): the failure this guards is not a wrong value but a refusal to
+    /// decode at all, and it takes the entire `MapResponse` down with it — so
+    /// the assertion that matters is that a peer *without* the key parses,
+    /// alongside its sibling proving a peer *with* the key still round-trips.
+    #[test]
+    fn node_without_addresses_deserializes_to_an_empty_vec() {
+        let json = r#"{"ID":1,"Key":"nodekey:abc","Name":"peer.example.ts.net."}"#;
+
+        let node: Node = serde_json::from_str(json).expect("a node with no Addresses must decode");
+
+        assert!(
+            node.addresses.is_empty(),
+            "absent Addresses must decode as empty, got {:?}",
+            node.addresses
+        );
+        assert_eq!(node.id, 1);
+    }
+
+    #[test]
+    fn node_with_addresses_still_decodes_them() {
+        let json = r#"{"ID":1,"Key":"nodekey:abc","Name":"peer.example.ts.net.","Addresses":["100.64.0.1/32"]}"#;
+
+        let node: Node = serde_json::from_str(json).expect("a node with Addresses must decode");
+
+        assert_eq!(node.addresses, vec!["100.64.0.1/32".to_string()]);
+    }
 
     #[test]
     fn register_request_serializes_to_json() {
