@@ -102,11 +102,11 @@ hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 325
+line = 333
 hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
 
 [[baseline.entry]]
 rule = "RUST/config-deny-unknown-fields"
 file = "crates/hamma-core/src/types.rs"
-line = 376
+line = 384
 hash = "90da8fc2c28fcb56dab7204cd818fa0ac787eaec8ae856c885e8f2d6fedaa459"
