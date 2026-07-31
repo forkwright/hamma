@@ -4,36 +4,6 @@ remove_after = "2026-08-13"
 reason = "hamma#57 lint-debt burn-down — entries deleted as each family clears; expiry enforces completion (expired non-empty baseline fails the gate)"
 
 [[baseline.entry]]
-rule = "CI/release-yml-missing-attestation"
-file = ".github/workflows/release-please.yml"
-line = 1
-hash = "b525087c2878d94b7bcb773fc6795d4e90b36c64bb32ad2ec421a37935890fb1"
-
-[[baseline.entry]]
-rule = "CONTEXT/preamble-required"
-file = "AGENTS.md"
-line = 1
-hash = "7f93f2a8274fa8ea007a3fcafe1376f4dec91decde6fce4b61695e99e39ee45a"
-
-[[baseline.entry]]
-rule = "ARCH/substrate-floating-ref"
-file = "Cargo.toml"
-line = 45
-hash = "3dd3f935ad12dd2617be05cb4d987a4868a14b93073115dbb080d92597eda6bb"
-
-[[baseline.entry]]
-rule = "TOPOLOGY/shallow-struct"
-file = "crates/dictyon/src/control/mod.rs"
-line = 106
-hash = "8dd305634c82286c46a4f8874850c916ab787219f6a50d2ab8fad418a1c43b2f"
-
-[[baseline.entry]]
-rule = "COMMENTS/deflection-without-tracking"
-file = "crates/dictyon/src/lib.rs"
-line = 25
-hash = "35596161772a6c47623b698d0e511382bf4b82bd12988281f0da36817e51672a"
-
-[[baseline.entry]]
 rule = "RUST/file-too-long"
 file = "crates/dictyon/src/wire.rs"
 line = 1

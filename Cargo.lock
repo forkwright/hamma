@@ -608,7 +608,7 @@ dependencies = [
 [[package]]
 name = "koinon"
 version = "0.1.0"
-source = "git+https://github.com/forkwright/koinon?branch=main#73179b9c5882def0252b68245ee38d03961eeaf3"
+source = "git+https://github.com/forkwright/koinon?tag=v0.1.0#d928b96ea3ab3c635c5012e66189988fd40d29fa"
 dependencies = [
  "clap",
  "figment",
