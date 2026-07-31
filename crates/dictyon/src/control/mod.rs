@@ -114,6 +114,84 @@ pub struct Netmap {
     pub derp_map: Option<DerpMap>,
 }
 
+impl Netmap {
+    /// Build a netmap from the first full [`MapResponse`].
+    ///
+    /// A missing self node falls back to a zero-value [`Node`]; missing
+    /// peers default to an empty list.
+    fn from_full_response(resp: MapResponse) -> Self {
+        let self_node = resp.node.unwrap_or_else(|| Node {
+            id: 0,
+            stable_id: None,
+            key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
+            machine: None,
+            name: String::new(),
+            cap: None,
+            tags: None,
+            addresses: Vec::new(),
+            allowed_ips: None,
+            endpoints: None,
+            derp: None,
+            disco_key: None,
+            key_expiry: None,
+            last_seen: None,
+            online: None,
+        });
+
+        Self {
+            self_node,
+            peers: resp.peers.unwrap_or_default(),
+            dns_config: resp.dns_config,
+            derp_map: resp.derp_map,
+        }
+    }
+
+    /// Apply a delta [`MapResponse`] onto an already-initialized netmap.
+    ///
+    /// See [`ControlClient::apply_map_response`] for the merge semantics.
+    fn apply_delta(&mut self, resp: MapResponse) {
+        if let Some(node) = resp.node {
+            self.self_node = node;
+        }
+
+        // Full peer replacement (if server sends full list again).
+        if let Some(peers) = resp.peers {
+            self.peers = peers;
+        }
+
+        // Incremental peer additions/changes.
+        if let Some(changed) = resp.peers_changed {
+            for changed_peer in changed {
+                if let Some(existing) = self.peers.iter_mut().find(|p| p.key == changed_peer.key) {
+                    *existing = changed_peer;
+                } else {
+                    self.peers.push(changed_peer);
+                }
+            }
+        }
+
+        // Peer removals.
+        if let Some(removals) = resp.peers_removed {
+            self.peers
+                .retain(|peer| !removals.iter().any(|removal| removes_peer(removal, peer)));
+        }
+
+        if let Some(changes) = resp.peers_changed_patch {
+            for change in changes {
+                apply_peer_change(&mut self.peers, change);
+            }
+        }
+
+        if let Some(dns) = resp.dns_config {
+            self.dns_config = Some(dns);
+        }
+
+        if let Some(derp) = resp.derp_map {
+            self.derp_map = Some(derp);
+        }
+    }
+}
+
 /// Client for the Tailscale control protocol.
 ///
 /// Wraps a [`ControlConnection`] and the node's identity keys. Provides
@@ -396,80 +474,8 @@ impl ControlClient {
         }
 
         match &mut self.netmap {
-            None => {
-                // First response: full initialization.
-                let self_node = resp.node.unwrap_or_else(|| Node {
-                    id: 0,
-                    stable_id: None,
-                    key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
-                    machine: None,
-                    name: String::new(),
-                    cap: None,
-                    tags: None,
-                    addresses: Vec::new(),
-                    allowed_ips: None,
-                    endpoints: None,
-                    derp: None,
-                    disco_key: None,
-                    key_expiry: None,
-                    last_seen: None,
-                    online: None,
-                });
-
-                let peers = resp.peers.unwrap_or_default();
-
-                self.netmap = Some(Netmap {
-                    self_node,
-                    peers,
-                    dns_config: resp.dns_config,
-                    derp_map: resp.derp_map,
-                });
-            }
-            Some(netmap) => {
-                // Delta update on existing netmap.
-                if let Some(node) = resp.node {
-                    netmap.self_node = node;
-                }
-
-                // Full peer replacement (if server sends full list again).
-                if let Some(peers) = resp.peers {
-                    netmap.peers = peers;
-                }
-
-                // Incremental peer additions/changes.
-                if let Some(changed) = resp.peers_changed {
-                    for changed_peer in changed {
-                        if let Some(existing) =
-                            netmap.peers.iter_mut().find(|p| p.key == changed_peer.key)
-                        {
-                            *existing = changed_peer;
-                        } else {
-                            netmap.peers.push(changed_peer);
-                        }
-                    }
-                }
-
-                // Peer removals.
-                if let Some(removals) = resp.peers_removed {
-                    netmap
-                        .peers
-                        .retain(|peer| !removals.iter().any(|removal| removes_peer(removal, peer)));
-                }
-
-                if let Some(changes) = resp.peers_changed_patch {
-                    for change in changes {
-                        apply_peer_change(&mut netmap.peers, change);
-                    }
-                }
-
-                if let Some(dns) = resp.dns_config {
-                    netmap.dns_config = Some(dns);
-                }
-
-                if let Some(derp) = resp.derp_map {
-                    netmap.derp_map = Some(derp);
-                }
-            }
+            None => self.netmap = Some(Netmap::from_full_response(resp)),
+            Some(netmap) => netmap.apply_delta(resp),
         }
     }
 

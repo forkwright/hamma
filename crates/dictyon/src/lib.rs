@@ -22,9 +22,9 @@
 //! - `MagicDNS` resolver
 //! - Route / exit-node configuration
 //!
-//! Out of scope: Taildrop, Tailscale SSH, Funnel, app connectors. Those are
-//! opinionated product features of tailscale.com and not required for hamma's
-//! mesh-networking target.
+//! Not implemented, by design: Taildrop, Tailscale SSH, Funnel, app
+//! connectors. Those are opinionated product features of tailscale.com, not
+//! part of hamma's mesh-networking target.
 
 #![deny(missing_docs)]
 

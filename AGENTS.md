@@ -1,3 +1,9 @@
+<!--
+scope: hamma repo — agent onboarding and dispatch conventions
+defers_to: CLAUDE.md for full repo conventions; kanon standards for universal engineering policy
+tightens: gate discipline (truthful Gate-Passed trailers, no AI indicators)
+-->
+
 # Agents — hamma
 
 Clean-room Rust Tailscale-compatible mesh networking stack.
