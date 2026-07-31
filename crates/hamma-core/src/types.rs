@@ -6,6 +6,8 @@
 //!
 //! References: `tailcfg/tailcfg.go` in the Tailscale Go source.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -51,11 +53,27 @@ pub struct RegisterRequest {
 }
 
 /// Authentication information included in [`RegisterRequest`].
-#[derive(Debug, Serialize)]
+///
+/// WARNING: `Debug` is implemented manually because `auth_key` is a credential.
+/// A derived `Debug` puts it verbatim into anything that formats this type, or
+/// the [`RegisterRequest`] that owns it — a log line, an error context, a panic
+/// payload. The redaction mirrors the one on private key types in
+/// [`crate::keys`].
+#[derive(Serialize)]
 pub struct AuthInfo {
     /// Pre-auth key value (e.g. `tskey-auth-...`).
     #[serde(rename = "AuthKey", skip_serializing_if = "Option::is_none")]
     pub auth_key: Option<String>,
+}
+
+impl fmt::Debug for AuthInfo {
+    /// WHY the presence is kept: whether a pre-auth key was supplied is the
+    /// question worth debugging, and it is answerable without the value.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthInfo")
+            .field("auth_key", &self.auth_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// Host information describing this machine to the control server.
@@ -689,6 +707,69 @@ mod tests {
         assert_eq!(
             removals[2],
             PeerRemoval::NodeKey("nodekey:legacy".to_string())
+        );
+    }
+    /// WHY: a derived `Debug` on `AuthInfo` printed the pre-auth key verbatim,
+    /// so any `{:?}` of a `RegisterRequest` leaked a credential into logs. This
+    /// fails if the manual impl is dropped or a derive is reinstated.
+    #[test]
+    fn auth_info_debug_redacts_the_pre_auth_key() {
+        let info = AuthInfo {
+            auth_key: Some("tskey-auth-kSeCrEtValue".to_string()),
+        };
+
+        let rendered = format!("{info:?}");
+
+        assert!(
+            !rendered.contains("tskey-auth-kSeCrEtValue"),
+            "Debug leaked the pre-auth key: {rendered}"
+        );
+        assert!(
+            rendered.contains("REDACTED"),
+            "Debug should mark the field redacted: {rendered}"
+        );
+    }
+
+    /// The leak path that matters is transitive — nothing formats a bare
+    /// `AuthInfo`, but `RegisterRequest` derives `Debug` and owns one.
+    #[test]
+    fn register_request_debug_does_not_leak_the_nested_pre_auth_key() {
+        let request = RegisterRequest {
+            node_key: "nodekey:abc".to_string(),
+            old_node_key: String::new(),
+            auth: Some(AuthInfo {
+                auth_key: Some("tskey-auth-kSeCrEtValue".to_string()),
+            }),
+            hostinfo: Hostinfo {
+                backend_log_id: "log-id".to_string(),
+                os: "linux".to_string(),
+                hostname: "test-host".to_string(),
+                go_version: String::new(),
+            },
+            followup: None,
+        };
+
+        let rendered = format!("{request:?}");
+
+        assert!(
+            !rendered.contains("tskey-auth-kSeCrEtValue"),
+            "RegisterRequest Debug leaked the nested pre-auth key: {rendered}"
+        );
+    }
+
+    /// An absent key must stay distinguishable from a redacted one, or the
+    /// redaction destroys the only thing the field was useful for in a log.
+    #[test]
+    fn auth_info_debug_distinguishes_absent_from_redacted() {
+        let absent = format!("{:?}", AuthInfo { auth_key: None });
+
+        assert!(
+            absent.contains("None"),
+            "an absent key should read as None: {absent}"
+        );
+        assert!(
+            !absent.contains("REDACTED"),
+            "an absent key must not claim to be redacted: {absent}"
         );
     }
 }

@@ -30,53 +30,53 @@ hash = "d1416ac2d86b612a4585758a52e83d66a15450d7f58243b77b7d088f687b2d55"
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 22
+line = 24
 hash = "cee9dd419270689ca45bb95a3dd9f766668fcdfb51d1b034b66732ec0038b759"
 
 [[baseline.entry]]
 rule = "COMMENTS/deflection-without-tracking"
 file = "crates/hamma-core/src/types.rs"
-line = 47
+line = 49
 hash = "975cca2afd4f9e1de126155160c6e9ab21c46761d7343be0434f9267af5e5ca2"
 
 [[baseline.entry]]
 rule = "RUST/primitive-for-domain-id"
 file = "crates/hamma-core/src/types.rs"
-line = 69
+line = 87
 hash = "3c90a99f16298b2da25f6da7d64694a68fadc112b8327efa26011de8fe271eeb"
 
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 111
+line = 129
 hash = "cee9dd419270689ca45bb95a3dd9f766668fcdfb51d1b034b66732ec0038b759"
 
 [[baseline.entry]]
 rule = "RUST/allow-not-expect"
 file = "crates/hamma-core/src/types.rs"
-line = 205
+line = 223
 hash = "0658fa78601251d1573deba75582c9589bcbc36324981ec0bca0a4e9a97c4c1f"
 
 [[baseline.entry]]
 rule = "RUST/non-exhaustive-enum"
 file = "crates/hamma-core/src/types.rs"
-line = 211
+line = 229
 hash = "b768832c348cb2cd9c5b56a6f7617ab8cecc5979f67ad1accc4f84ab29d70561"
 
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 254
+line = 272
 hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
 
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 333
+line = 351
 hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
 
 [[baseline.entry]]
 rule = "RUST/config-deny-unknown-fields"
 file = "crates/hamma-core/src/types.rs"
-line = 384
+line = 402
 hash = "90da8fc2c28fcb56dab7204cd818fa0ac787eaec8ae856c885e8f2d6fedaa459"
