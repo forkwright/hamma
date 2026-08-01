@@ -13,6 +13,9 @@ use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange, P
 
 use super::*;
 
+// WHY: a sibling file so neither module crosses the file-length limit.
+mod peer_cap_tests;
+
 /// Build a `ControlClient` with a paired transport for unit testing.
 ///
 /// The transport is not usable for actual communication -- these

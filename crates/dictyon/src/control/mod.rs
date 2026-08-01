@@ -25,10 +25,19 @@ use hamma_core::types::{
     RegisterRequest, RegisterResponse,
 };
 use snafu::Snafu;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::transport::ControlConnection;
 use crate::wire::AsyncControlStream;
+
+/// Upper bound on the peers a netmap retains from a coordination server.
+///
+/// WHY: every peer-bearing field of a [`MapResponse`] is server-controlled and
+/// unbounded on the wire, so a misbehaving or hostile server can grow
+/// [`Netmap::peers`] without limit across a single connection. The cap sits far
+/// above any realistic tailnet, so it is unreachable in normal operation and
+/// only bounds the memory one connection can commit.
+const MAX_PEERS: usize = 10_000;
 
 /// Errors from control protocol operations.
 #[derive(Debug, Snafu)]
@@ -147,9 +156,12 @@ impl Netmap {
             online: None,
         });
 
+        let mut peers = resp.peers.unwrap_or_default();
+        cap_peers(&mut peers);
+
         Self {
             self_node,
-            peers: resp.peers.unwrap_or_default(),
+            peers,
             dns_config: resp.dns_config,
             derp_map: resp.derp_map,
         }
@@ -164,18 +176,32 @@ impl Netmap {
         }
 
         // Full peer replacement (if server sends full list again).
-        if let Some(peers) = resp.peers {
+        if let Some(mut peers) = resp.peers {
+            cap_peers(&mut peers);
             self.peers = peers;
         }
 
         // Incremental peer additions/changes.
         if let Some(changed) = resp.peers_changed {
+            // WHY: counted rather than warned per peer, so a server sending a
+            // large over-cap delta costs one log line instead of one per peer.
+            let mut refused = 0usize;
             for changed_peer in changed {
                 if let Some(existing) = self.peers.iter_mut().find(|p| p.key == changed_peer.key) {
+                    // WHY: an update to a peer already held is not growth, so it
+                    // still applies once the netmap has reached the cap.
                     *existing = changed_peer;
-                } else {
+                } else if self.peers.len() < MAX_PEERS {
                     self.peers.push(changed_peer);
+                } else {
+                    refused += 1;
                 }
+            }
+            if refused > 0 {
+                warn!(
+                    cap = MAX_PEERS,
+                    refused, "netmap is at the peer cap; refused new peers from a map response"
+                );
             }
         }
 
@@ -477,6 +503,10 @@ impl ControlClient {
     /// - `node`: updates the self node if present.
     /// - `dns_config` and `derp_map`: replace the previous values if
     ///   present.
+    ///
+    /// The retained peer list is bounded by [`MAX_PEERS`]: an over-cap list is
+    /// truncated and additions past the cap are refused. Updates to peers
+    /// already held still apply, since they do not grow the list.
     pub fn apply_map_response(&mut self, resp: MapResponse) {
         if resp.keep_alive == Some(true) {
             return;
@@ -557,6 +587,21 @@ fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
 
     if let Some(key_expiry) = change.key_expiry {
         peer.key_expiry = Some(key_expiry);
+    }
+}
+
+/// Truncate a server-supplied peer list to [`MAX_PEERS`].
+///
+/// WHY: shared by both paths that accept a whole list from the server, so the
+/// cap cannot be enforced on one and forgotten on the other.
+fn cap_peers(peers: &mut Vec<Node>) {
+    if peers.len() > MAX_PEERS {
+        let dropped = peers.len() - MAX_PEERS;
+        warn!(
+            cap = MAX_PEERS,
+            dropped, "map response exceeded the peer cap; dropped the excess peers"
+        );
+        peers.truncate(MAX_PEERS);
     }
 }
 
