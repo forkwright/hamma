@@ -613,3 +613,75 @@ proptest::proptest! {
         }
     }
 }
+
+#[test]
+fn apply_map_response_removes_peers_named_by_either_identifier_in_one_delta() {
+    // WHY(#55): the removal sweep now indexes the removal list instead of
+    // rescanning it per peer. Both identifier kinds, and a removal naming a
+    // peer that is not present, must behave exactly as the linear scan did.
+    let mut client = paired_client();
+
+    let initial = MapResponse {
+        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
+        peers: Some(vec![
+            sample_node(2, "nodekey:peer1", "peer1.ts.net."),
+            sample_node(3, "nodekey:peer2", "peer2.ts.net."),
+            sample_node(4, "nodekey:peer3", "peer3.ts.net."),
+            sample_node(5, "nodekey:peer4", "peer4.ts.net."),
+        ]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(initial);
+    assert_eq!(client.peers().len(), 4);
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: Some(vec![
+            PeerRemoval::NodeId(3),
+            PeerRemoval::NodeKey("nodekey:peer4".to_string()),
+            PeerRemoval::NodeId(3),
+            PeerRemoval::NodeId(999),
+            PeerRemoval::NodeKey("nodekey:absent".to_string()),
+        ]),
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client.apply_map_response(delta);
+
+    let remaining: Vec<&str> = client.peers().iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(
+        remaining,
+        vec!["nodekey:peer1", "nodekey:peer3"],
+        "removals by id and by key must both apply, and unmatched removals must be inert"
+    );
+}
+
+#[test]
+fn frame_len_accepts_the_largest_representable_payload() {
+    let max = usize::try_from(u32::MAX).expect("u32::MAX fits usize on supported targets");
+    assert_eq!(frame_len(max).expect("u32::MAX is representable"), u32::MAX);
+}
+
+// WHY: on a 32-bit target `usize` cannot exceed `u32::MAX`, so the rejection is
+// unreachable and the test would assert nothing.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn frame_len_rejects_a_payload_that_cannot_be_framed() {
+    // WHY(#55): this previously clamped to u32::MAX, writing a length prefix
+    // that disagreed with the bytes after it and desynchronising the peer.
+    let over = usize::try_from(u32::MAX).expect("u32::MAX fits usize on 64-bit") + 1;
+    let err = frame_len(over).expect_err("a payload above u32::MAX must not be framed");
+    assert!(
+        matches!(err, ControlError::PayloadTooLarge { len } if len == over),
+        "expected PayloadTooLarge naming the offending length, got {err:?}"
+    );
+}
