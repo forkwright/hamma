@@ -12,7 +12,7 @@ hash = "88dd9c77208afc8e0f1efc6fbb0b11e6976ac2e5ee44f299151ea39fa0e2ec69"
 [[baseline.entry]]
 rule = "RUST/indexing-slicing"
 file = "crates/dictyon/src/wire.rs"
-line = 767
+line = 855
 hash = "042372e88aaac09d1462bf65371311633e7fe0f34fe50155e9f980545d0f2f5b"
 
 [[baseline.entry]]

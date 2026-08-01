@@ -24,7 +24,7 @@ use hamma_core::config::{Config, WireConfig};
 use hamma_core::keys::{KeyError, MachinePrivate, MachinePublic};
 use rustls::ClientConfig;
 use snafu::{ResultExt, Snafu};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tracing::debug;
@@ -180,9 +180,29 @@ impl ControlConfig {
 pub struct AsyncControlStream {
     stream: tokio_rustls::client::TlsStream<TcpStream>,
     conn: ControlConnection,
+    /// Bytes already read off the stream but not yet consumed by a frame.
+    ///
+    /// INVARIANT: the header read may over-read past the `\r\n\r\n`
+    /// terminator and past the Noise response frame, so any surplus is
+    /// parked here and must be drained before touching the stream again.
+    pending: Vec<u8>,
 }
 
 impl AsyncControlStream {
+    /// Fill `out` completely, taking buffered bytes before reading the stream.
+    ///
+    /// WARNING: reading the stream directly instead of calling this drops any
+    /// bytes the handshake over-read, desynchronising every later frame.
+    async fn fill_exact(&mut self, out: &mut [u8]) -> Result<(), WireError> {
+        let taken = take_pending(&mut self.pending, out);
+        if let Some(rest) = out.get_mut(taken..)
+            && !rest.is_empty()
+        {
+            self.stream.read_exact(rest).await.context(TlsSnafu)?;
+        }
+        Ok(())
+    }
+
     /// Encrypt `payload` and write it to the TLS stream.
     ///
     /// # Errors
@@ -225,10 +245,7 @@ impl AsyncControlStream {
     pub async fn recv_message(&mut self) -> Result<Vec<u8>, WireError> {
         // Read 3-byte frame header.
         let mut header = [0u8; 3];
-        self.stream
-            .read_exact(&mut header)
-            .await
-            .context(TlsSnafu)?;
+        self.fill_exact(&mut header).await?;
 
         let [frame_type, len_hi, len_lo] = header;
         if frame_type != FRAME_TYPE_TRANSPORT {
@@ -244,10 +261,7 @@ impl AsyncControlStream {
             "reading control message frame",
         );
         let mut ciphertext = vec![0u8; body_len];
-        self.stream
-            .read_exact(&mut ciphertext)
-            .await
-            .context(TlsSnafu)?;
+        self.fill_exact(&mut ciphertext).await?;
 
         let plaintext = self
             .conn
@@ -521,8 +535,10 @@ async fn connect_with_key_and_tls(
         .context(TlsSnafu)?;
     debug!(target: "dictyon::wire", "noise upgrade request written");
 
-    // Read HTTP headers; the Noise response frame follows in the stream.
-    let (status_line, _) = read_upgrade_response(&mut tls_stream, &config.config.wire).await?;
+    // Read HTTP headers; the Noise response frame follows in the stream, and
+    // the chunked header read may already have captured part or all of it.
+    let (status_line, after_headers) =
+        read_upgrade_response(&mut tls_stream, &config.config.wire).await?;
 
     if !status_line.contains("101") {
         return Err(WireError::UnexpectedStatus { status_line });
@@ -531,7 +547,7 @@ async fn connect_with_key_and_tls(
 
     // Read the Noise response frame from the stream.
     // Frame format: [1B type=0x02][2B BE payload_len][noise_msg]
-    let noise_body = read_noise_response_frame(&mut tls_stream).await?;
+    let (noise_body, pending) = read_noise_response_frame(&mut tls_stream, after_headers).await?;
     debug!(
         target: "dictyon::wire",
         response_len = noise_body.len(),
@@ -554,6 +570,7 @@ async fn connect_with_key_and_tls(
     Ok(AsyncControlStream {
         stream: tls_stream,
         conn,
+        pending,
     })
 }
 
@@ -635,33 +652,78 @@ fn build_upgrade_request(host: &str, init_b64: &str) -> String {
     )
 }
 
-/// Read the Noise response frame from the stream after the HTTP 101 headers.
+/// Move up to `out.len()` bytes off the front of `pending` into `out`.
+///
+/// Returns the number of bytes moved.
+fn take_pending(pending: &mut Vec<u8>, out: &mut [u8]) -> usize {
+    let n = pending.len().min(out.len());
+    let (Some(dst), Some(src)) = (out.get_mut(..n), pending.get(..n)) else {
+        return 0;
+    };
+    dst.copy_from_slice(src);
+    pending.drain(..n);
+    n
+}
+
+/// Read the Noise response frame, consuming `prefix` before the stream.
 ///
 /// The server sends the Noise response frame directly in the stream after
-/// `\r\n\r\n`. Frame format: `[1B type=0x02][2B BE payload_len][noise_msg]`.
-/// Returns the full framed bytes for `NoiseHandshake::process_response`.
-async fn read_noise_response_frame(
-    stream: &mut tokio_rustls::client::TlsStream<TcpStream>,
-) -> Result<Vec<u8>, WireError> {
+/// `\r\n\r\n`, so the header read routinely captures some or all of it.
+/// Frame format: `[1B type=0x02][2B BE payload_len][noise_msg]`.
+///
+/// INVARIANT: `prefix` holds the bytes already read past the header
+/// terminator. Returns the full framed bytes for
+/// `NoiseHandshake::process_response` plus whatever of `prefix` remained
+/// beyond the frame; dropping that surplus would desynchronise the first
+/// transport frame.
+async fn read_noise_response_frame<R>(
+    stream: &mut R,
+    mut prefix: Vec<u8>,
+) -> Result<(Vec<u8>, Vec<u8>), WireError>
+where
+    R: AsyncRead + Unpin,
+{
     let mut header = [0u8; 3];
-    stream.read_exact(&mut header).await.context(TlsSnafu)?;
+    fill_from(stream, &mut prefix, &mut header).await?;
 
     let [_msg_type, len_hi, len_lo] = header;
     let payload_len = usize::from(u16::from_be_bytes([len_hi, len_lo]));
     let mut noise_msg = vec![0u8; payload_len];
-    stream.read_exact(&mut noise_msg).await.context(TlsSnafu)?;
+    fill_from(stream, &mut prefix, &mut noise_msg).await?;
 
     let mut framed = Vec::with_capacity(3 + payload_len);
     framed.extend_from_slice(&header);
     framed.extend_from_slice(&noise_msg);
-    Ok(framed)
+    Ok((framed, prefix))
+}
+
+/// Fill `out` from `prefix` first, then from `stream`.
+async fn fill_from<R>(stream: &mut R, prefix: &mut Vec<u8>, out: &mut [u8]) -> Result<(), WireError>
+where
+    R: AsyncRead + Unpin,
+{
+    let taken = take_pending(prefix, out);
+    if let Some(rest) = out.get_mut(taken..)
+        && !rest.is_empty()
+    {
+        stream.read_exact(rest).await.context(TlsSnafu)?;
+    }
+    Ok(())
 }
 
 /// Read until `\r\n\r\n`, returning (`first_line`, `bytes_after_headers`).
-async fn read_upgrade_response(
-    stream: &mut tokio_rustls::client::TlsStream<TcpStream>,
+///
+/// INVARIANT: the second element is not decorative. The header read is
+/// chunked, so it routinely captures bytes belonging to the Noise response
+/// frame that follows; the caller must feed them to
+/// [`read_noise_response_frame`].
+async fn read_upgrade_response<R>(
+    stream: &mut R,
     cfg: &WireConfig,
-) -> Result<(String, Vec<u8>), WireError> {
+) -> Result<(String, Vec<u8>), WireError>
+where
+    R: AsyncRead + Unpin,
+{
     let buf = read_until_header_end(stream, cfg).await?;
 
     // Split at the header terminator.
@@ -696,17 +758,32 @@ async fn read_upgrade_response(
 }
 
 /// Read from the stream until we see `\r\n\r\n` or hit the size limit.
-async fn read_until_header_end(
-    stream: &mut tokio_rustls::client::TlsStream<TcpStream>,
-    cfg: &WireConfig,
-) -> Result<Vec<u8>, WireError> {
+///
+/// Reads in chunks rather than a byte at a time, so the returned buffer may
+/// extend past the terminator into the Noise response frame. The size limit
+/// applies to the header block itself — the position of the terminator — not
+/// to the total number of bytes buffered, or a large frame arriving in the
+/// same chunk would be misreported as oversized headers.
+async fn read_until_header_end<R>(stream: &mut R, cfg: &WireConfig) -> Result<Vec<u8>, WireError>
+where
+    R: AsyncRead + Unpin,
+{
     let max_header_bytes = cfg.max_header_bytes;
     let mut buf = Vec::with_capacity(cfg.header_read_initial_capacity);
-    let mut byte = [0u8; 1];
+    let mut chunk = vec![0u8; cfg.response_read_chunk_bytes.max(1)];
+    // WHY: a terminator can straddle a chunk boundary, so rescan the last
+    // three bytes of the previous fill alongside the new ones.
+    let mut scanned = 0usize;
 
     loop {
-        stream.read_exact(&mut byte).await.context(TlsSnafu)?;
-        buf.extend_from_slice(&byte);
+        if let Some(sep_pos) = find_header_end(&buf, scanned) {
+            if sep_pos > max_header_bytes {
+                return Err(WireError::MalformedHeaders {
+                    message: format!("headers exceeded {max_header_bytes} bytes"),
+                });
+            }
+            return Ok(buf);
+        }
 
         if buf.len() > max_header_bytes {
             return Err(WireError::MalformedHeaders {
@@ -714,17 +791,28 @@ async fn read_until_header_end(
             });
         }
 
-        // Check for \r\n\r\n
-        if buf.len() >= 4
-            && buf
-                .get(buf.len() - 4..)
-                .is_some_and(|tail| tail == b"\r\n\r\n")
-        {
-            break;
+        scanned = buf.len();
+        let n = stream.read(&mut chunk).await.context(TlsSnafu)?;
+        if n == 0 {
+            return Err(WireError::MalformedHeaders {
+                message: "connection closed before header terminator".to_string(),
+            });
         }
+        let slice = chunk.get(..n).ok_or_else(|| WireError::MalformedHeaders {
+            message: "read returned more bytes than buffer".to_string(),
+        })?;
+        buf.extend_from_slice(slice);
     }
+}
 
-    Ok(buf)
+/// Find `\r\n\r\n` in `buf`, resuming three bytes before `scanned`.
+fn find_header_end(buf: &[u8], scanned: usize) -> Option<usize> {
+    let from = scanned.saturating_sub(3);
+    let window = buf.get(from..)?;
+    window
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|p| p + from)
 }
 
 /// Read the full HTTP/1.1 response body (for the /key endpoint).
@@ -790,7 +878,211 @@ fn parse_server_key_response(response: &[u8]) -> Result<MachinePublic, WireError
     reason = "tests use expect() for invariants that must hold"
 )]
 mod tests {
+    use std::collections::VecDeque;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use tokio::io::ReadBuf;
+
     use super::*;
+
+    /// A reader that yields pre-set chunks, at most one per `poll_read`.
+    ///
+    /// WHY: the defect under test is dependence on where the stream happens
+    /// to split, so a test needs to choose the split points itself. An
+    /// exhausted reader reports EOF.
+    struct ChunkReader {
+        chunks: VecDeque<Vec<u8>>,
+    }
+
+    impl ChunkReader {
+        fn new<I: IntoIterator<Item = Vec<u8>>>(chunks: I) -> Self {
+            Self {
+                chunks: chunks.into_iter().filter(|c| !c.is_empty()).collect(),
+            }
+        }
+
+        fn empty() -> Self {
+            Self {
+                chunks: VecDeque::new(),
+            }
+        }
+    }
+
+    impl AsyncRead for ChunkReader {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            let Some(front) = self.chunks.front_mut() else {
+                return Poll::Ready(Ok(()));
+            };
+            let n = front.len().min(buf.remaining());
+            let taken: Vec<u8> = front.drain(..n).collect();
+            buf.put_slice(&taken);
+            if front.is_empty() {
+                self.chunks.pop_front();
+            }
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// `[1B type=0x02][2B BE len][payload]` — the Noise response frame shape.
+    fn noise_frame(payload: &[u8]) -> Vec<u8> {
+        let len = u16::try_from(payload.len()).expect("test payload fits u16");
+        let mut f = vec![0x02];
+        f.extend_from_slice(&len.to_be_bytes());
+        f.extend_from_slice(payload);
+        f
+    }
+
+    const HEADERS: &[u8] =
+        b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: tailscale-control-protocol\r\n\r\n";
+
+    #[tokio::test]
+    async fn read_upgrade_response_returns_the_bytes_after_the_terminator() {
+        let frame = noise_frame(b"noise-response");
+        let mut wire = HEADERS.to_vec();
+        wire.extend_from_slice(&frame);
+        // The whole response arrives in one chunk, as a real server sends it.
+        let mut stream = ChunkReader::new([wire]);
+
+        let (status_line, after) = read_upgrade_response(&mut stream, &WireConfig::default())
+            .await
+            .expect("headers should parse");
+
+        assert_eq!(status_line, "HTTP/1.1 101 Switching Protocols");
+        assert_eq!(after, frame, "frame bytes must survive the header read");
+    }
+
+    #[tokio::test]
+    async fn read_noise_response_frame_reads_entirely_from_the_prefix() {
+        // The stream is at EOF: every byte of the frame was already captured
+        // by the header read. Reading the stream here would fail outright.
+        let frame = noise_frame(b"payload");
+        let (framed, leftover) =
+            read_noise_response_frame(&mut ChunkReader::empty(), frame.clone())
+                .await
+                .expect("frame should come from the prefix");
+
+        assert_eq!(framed, frame);
+        assert!(leftover.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_noise_response_frame_preserves_bytes_beyond_the_frame() {
+        let frame = noise_frame(b"payload");
+        let mut prefix = frame.clone();
+        prefix.extend_from_slice(b"first-transport-frame");
+
+        let (framed, leftover) = read_noise_response_frame(&mut ChunkReader::empty(), prefix)
+            .await
+            .expect("frame should parse");
+
+        assert_eq!(framed, frame);
+        assert_eq!(
+            leftover, b"first-transport-frame",
+            "surplus must be handed back, not dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_noise_response_frame_spans_prefix_and_stream() {
+        let frame = noise_frame(b"payload");
+        // The header read stopped two bytes into the frame header.
+        let split = 2;
+        let prefix = frame.get(..split).expect("split within frame").to_vec();
+        let rest = frame.get(split..).expect("split within frame").to_vec();
+        let mut stream = ChunkReader::new([rest]);
+
+        let (framed, leftover) = read_noise_response_frame(&mut stream, prefix)
+            .await
+            .expect("frame should parse across the boundary");
+
+        assert_eq!(framed, frame);
+        assert!(leftover.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_until_header_end_finds_a_terminator_split_across_chunks() {
+        // The terminator straddles the boundary: "...\r\n" | "\r\n..."
+        let first = b"HTTP/1.1 101 OK\r\nX: y\r\n".to_vec();
+        let second = b"\r\nbody".to_vec();
+        let mut stream = ChunkReader::new([first, second]);
+
+        let buf = read_until_header_end(&mut stream, &WireConfig::default())
+            .await
+            .expect("terminator should be found across the boundary");
+
+        assert!(buf.ends_with(b"\r\n\r\nbody"));
+    }
+
+    #[tokio::test]
+    async fn read_until_header_end_accepts_a_body_larger_than_the_header_cap() {
+        // Short headers, then a body far over max_header_bytes in the same
+        // chunk. Bounding on buffer length instead of terminator position
+        // would reject this valid response.
+        let mut cfg = WireConfig::default();
+        cfg.max_header_bytes = 64;
+        let mut wire = b"HTTP/1.1 101 OK\r\n\r\n".to_vec();
+        wire.extend_from_slice(&vec![b'x'; 4096]);
+        let mut stream = ChunkReader::new([wire]);
+
+        let buf = read_until_header_end(&mut stream, &cfg)
+            .await
+            .expect("a large body must not read as oversized headers");
+
+        assert!(
+            buf.len() > cfg.max_header_bytes,
+            "the cap must bound the header block, not the bytes buffered",
+        );
+        assert!(buf.starts_with(b"HTTP/1.1 101 OK\r\n\r\n"));
+    }
+
+    #[tokio::test]
+    async fn read_until_header_end_rejects_headers_over_the_cap() {
+        let mut cfg = WireConfig::default();
+        cfg.max_header_bytes = 64;
+        // No terminator anywhere.
+        let mut stream = ChunkReader::new([vec![b'h'; 512]]);
+
+        let err = read_until_header_end(&mut stream, &cfg)
+            .await
+            .expect_err("oversized headers must be rejected");
+
+        assert!(matches!(err, WireError::MalformedHeaders { .. }));
+    }
+
+    #[tokio::test]
+    async fn read_until_header_end_errors_on_eof_before_the_terminator() {
+        let mut stream = ChunkReader::new([b"HTTP/1.1 101 OK\r\n".to_vec()]);
+
+        let err = read_until_header_end(&mut stream, &WireConfig::default())
+            .await
+            .expect_err("a truncated header block must error");
+
+        assert!(matches!(err, WireError::MalformedHeaders { .. }));
+    }
+
+    #[test]
+    fn take_pending_drains_only_what_fits() {
+        let mut pending = b"abcdef".to_vec();
+        let mut out = [0u8; 4];
+
+        assert_eq!(take_pending(&mut pending, &mut out), 4);
+        assert_eq!(&out, b"abcd");
+        assert_eq!(pending, b"ef");
+    }
+
+    #[test]
+    fn take_pending_reports_a_short_fill() {
+        let mut pending = b"ab".to_vec();
+        let mut out = [0u8; 4];
+
+        assert_eq!(take_pending(&mut pending, &mut out), 2);
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn parse_host_port_https_default() {
