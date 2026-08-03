@@ -24,7 +24,7 @@ hash = "70acf00586aa7b90c3866278505be7b81fb7ee1f7e21c17c1a22ac239be3c72a"
 [[baseline.entry]]
 rule = "RUST/no-silent-result-swallow"
 file = "crates/hamma-core/src/keys.rs"
-line = 232
+line = 240
 hash = "d1416ac2d86b612a4585758a52e83d66a15450d7f58243b77b7d088f687b2d55"
 
 [[baseline.entry]]
