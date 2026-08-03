@@ -81,6 +81,19 @@ pub enum NoiseError {
         message: String,
     },
 
+    /// A transport message could not be framed because it exceeds the
+    /// wire format's size limits.
+    ///
+    /// WARNING: this is a caller error on an otherwise healthy session --
+    /// the handshake has already completed and the transport remains
+    /// usable. Retrying the same message cannot succeed; re-driving the
+    /// handshake is not a remedy.
+    #[snafu(display("frame too large: {message}"))]
+    FrameTooLarge {
+        /// Description of the size limit that was exceeded.
+        message: String,
+    },
+
     /// Operation attempted in an invalid state (e.g., encrypting before
     /// the handshake is complete).
     #[snafu(display("invalid state: {message}"))]
@@ -317,13 +330,14 @@ impl NoiseTransport {
     ///
     /// # Errors
     ///
-    /// Returns [`NoiseError::HandshakeFailed`] if the plaintext exceeds
-    /// the maximum frame payload size, or [`NoiseError::Snow`] on
-    /// encryption failure.
+    /// Returns [`NoiseError::FrameTooLarge`] if the plaintext exceeds the
+    /// maximum frame payload size or the ciphertext exceeds the frame
+    /// header's `u16` length field, or [`NoiseError::Snow`] on encryption
+    /// failure.
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, NoiseError> {
         let max_payload = self.config.max_frame_payload;
         if plaintext.len() > max_payload {
-            return Err(NoiseError::HandshakeFailed {
+            return Err(NoiseError::FrameTooLarge {
                 message: format!("payload too large: {} > {max_payload}", plaintext.len()),
             });
         }
@@ -332,7 +346,7 @@ impl NoiseTransport {
         let ct_len = self.transport.write_message(plaintext, &mut ciphertext)?;
         ciphertext.truncate(ct_len);
 
-        let frame_len = u16::try_from(ct_len).map_err(|_| NoiseError::HandshakeFailed {
+        let frame_len = u16::try_from(ct_len).map_err(|_| NoiseError::FrameTooLarge {
             message: "ciphertext too large for frame".into(),
         })?;
 

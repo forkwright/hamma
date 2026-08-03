@@ -428,7 +428,10 @@ proptest::proptest! {
         let (mut client, _server) = paired_transports();
         let oversized = vec![0xFFu8; MAX_FRAME_PAYLOAD + extra];
         let result = client.encrypt(&oversized);
-        assert!(result.is_err(), "encrypt must fail for payloads exceeding MAX_FRAME_PAYLOAD");
+        assert!(
+            matches!(result, Err(NoiseError::FrameTooLarge { .. })),
+            "an oversized payload is a framing error on a live transport, not a handshake failure; got {result:?}"
+        );
     }
 }
 
@@ -463,10 +466,38 @@ fn noise_config_tightens_frame_payload_limit() {
     let mut custom_client = NoiseTransport::from_snow_with_config(client_state, custom_cfg);
     let result = custom_client.encrypt(&plaintext);
     assert!(
-        result.is_err(),
-        "custom config with max_frame_payload={custom_limit} must reject {}-byte payload",
+        matches!(result, Err(NoiseError::FrameTooLarge { .. })),
+        "custom config with max_frame_payload={custom_limit} must reject {}-byte payload as a framing error; got {result:?}",
         plaintext.len()
     );
+}
+
+/// The transport stays usable after a frame-size rejection.
+///
+/// WARNING: this is the behaviour the old `HandshakeFailed` classification
+/// hid. A caller that treats a handshake failure as "session is dead, tear
+/// it down and re-handshake" would have discarded a healthy session over an
+/// oversized message.
+#[test]
+fn frame_too_large_leaves_the_transport_usable() {
+    let (mut client, mut server) = paired_transports();
+
+    let oversized = vec![0xCDu8; MAX_FRAME_PAYLOAD + 1];
+    let rejected = client.encrypt(&oversized);
+    assert!(
+        matches!(rejected, Err(NoiseError::FrameTooLarge { .. })),
+        "expected a framing error, got {rejected:?}"
+    );
+
+    let plaintext = b"the session survives an oversized message";
+    let frame = client
+        .encrypt(plaintext)
+        .expect("transport must still encrypt after a frame-size rejection");
+    let ct_len = usize::from(u16::from_be_bytes([frame[1], frame[2]]));
+    let decrypted = server
+        .decrypt(&frame[3..3 + ct_len])
+        .expect("server must still decrypt after the client rejected an oversized message");
+    assert_eq!(decrypted, plaintext);
 }
 
 // -----------------------------------------------------------------------

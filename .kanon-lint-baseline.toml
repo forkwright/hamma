@@ -12,7 +12,7 @@ hash = "88dd9c77208afc8e0f1efc6fbb0b11e6976ac2e5ee44f299151ea39fa0e2ec69"
 [[baseline.entry]]
 rule = "RUST/indexing-slicing"
 file = "crates/dictyon/src/wire.rs"
-line = 767
+line = 828
 hash = "042372e88aaac09d1462bf65371311633e7fe0f34fe50155e9f980545d0f2f5b"
 
 [[baseline.entry]]
@@ -24,7 +24,7 @@ hash = "70acf00586aa7b90c3866278505be7b81fb7ee1f7e21c17c1a22ac239be3c72a"
 [[baseline.entry]]
 rule = "RUST/no-silent-result-swallow"
 file = "crates/hamma-core/src/keys.rs"
-line = 232
+line = 240
 hash = "d1416ac2d86b612a4585758a52e83d66a15450d7f58243b77b7d088f687b2d55"
 
 [[baseline.entry]]
@@ -52,31 +52,25 @@ line = 129
 hash = "cee9dd419270689ca45bb95a3dd9f766668fcdfb51d1b034b66732ec0038b759"
 
 [[baseline.entry]]
-rule = "RUST/allow-not-expect"
-file = "crates/hamma-core/src/types.rs"
-line = 223
-hash = "0658fa78601251d1573deba75582c9589bcbc36324981ec0bca0a4e9a97c4c1f"
-
-[[baseline.entry]]
 rule = "RUST/non-exhaustive-enum"
 file = "crates/hamma-core/src/types.rs"
-line = 229
+line = 225
 hash = "b768832c348cb2cd9c5b56a6f7617ab8cecc5979f67ad1accc4f84ab29d70561"
 
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 272
+line = 268
 hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
 
 [[baseline.entry]]
 rule = "RUST/no-debug-derive-on-public-types"
 file = "crates/hamma-core/src/types.rs"
-line = 351
+line = 347
 hash = "ee9dac68a0aa2f5c0f01e1cb64bd09b9ab8b2418b4ae0d9d383a582ae3733ca1"
 
 [[baseline.entry]]
 rule = "RUST/config-deny-unknown-fields"
 file = "crates/hamma-core/src/types.rs"
-line = 402
+line = 398
 hash = "90da8fc2c28fcb56dab7204cd818fa0ac787eaec8ae856c885e8f2d6fedaa459"
