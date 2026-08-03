@@ -128,6 +128,36 @@ pub enum WireError {
         /// Description of the problem.
         message: String,
     },
+
+    /// Connection establishment exceeded the configured deadline.
+    #[snafu(display("control connection timed out after {millis} ms"))]
+    ConnectTimeout {
+        /// The deadline that elapsed, in milliseconds.
+        millis: u64,
+    },
+}
+
+/// Apply the configured establishment deadline to `fut`.
+///
+/// WHY: TCP connect, TLS handshake, HTTP upgrade and the Noise response frame
+/// are each an unbounded await against a stalling or blackholing peer, and the
+/// task and socket are held for the lifetime of the runtime when one pends
+/// forever. Budgeting the whole sequence once — rather than per step — also
+/// stops a peer from stalling indefinitely by dribbling each step just under
+/// its own deadline.
+async fn with_connect_deadline<F, T>(cfg: &WireConfig, fut: F) -> Result<T, WireError>
+where
+    F: std::future::Future<Output = Result<T, WireError>>,
+{
+    match cfg.connect_timeout() {
+        None => fut.await,
+        Some(deadline) => match tokio::time::timeout(deadline, fut).await {
+            Ok(result) => result,
+            Err(_elapsed) => Err(WireError::ConnectTimeout {
+                millis: cfg.connect_timeout_ms,
+            }),
+        },
+    }
 }
 
 impl From<crate::noise::NoiseError> for WireError {
@@ -312,6 +342,13 @@ pub async fn fetch_server_key_with_config(
     control_url: &str,
     cfg: &WireConfig,
 ) -> Result<MachinePublic, WireError> {
+    with_connect_deadline(cfg, fetch_server_key_with_config_inner(control_url, cfg)).await
+}
+
+async fn fetch_server_key_with_config_inner(
+    control_url: &str,
+    cfg: &WireConfig,
+) -> Result<MachinePublic, WireError> {
     let (host, port) = parse_host_port(control_url)?;
     debug!(
         target: "dictyon::wire",
@@ -430,6 +467,18 @@ pub async fn fetch_server_key_with_tls_and_config(
     tls_config: ClientConfig,
     cfg: &WireConfig,
 ) -> Result<MachinePublic, WireError> {
+    with_connect_deadline(
+        cfg,
+        fetch_server_key_with_tls_and_config_inner(control_url, tls_config, cfg),
+    )
+    .await
+}
+
+async fn fetch_server_key_with_tls_and_config_inner(
+    control_url: &str,
+    tls_config: ClientConfig,
+    cfg: &WireConfig,
+) -> Result<MachinePublic, WireError> {
     let (host, port) = parse_host_port(control_url)?;
     debug!(
         target: "dictyon::wire",
@@ -490,6 +539,18 @@ async fn connect_with_key(
 
 /// Inner connect with caller-supplied TLS config and a pre-fetched server key.
 async fn connect_with_key_and_tls(
+    config: &ControlConfig,
+    server_key: MachinePublic,
+    tls_cfg: ClientConfig,
+) -> Result<AsyncControlStream, WireError> {
+    with_connect_deadline(
+        &config.config.wire,
+        connect_with_key_and_tls_inner(config, server_key, tls_cfg),
+    )
+    .await
+}
+
+async fn connect_with_key_and_tls_inner(
     config: &ControlConfig,
     server_key: MachinePublic,
     tls_cfg: ClientConfig,
@@ -881,8 +942,10 @@ mod tests {
     use std::collections::VecDeque;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+    use std::time::Duration;
 
     use tokio::io::ReadBuf;
+    use tokio::net::TcpListener;
 
     use super::*;
 
@@ -1082,6 +1145,46 @@ mod tests {
 
         assert_eq!(take_pending(&mut pending, &mut out), 2);
         assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn connect_times_out_against_a_blackholing_peer() {
+        // A peer that completes the TCP handshake and then says nothing. The
+        // TLS ServerHello never arrives, so without a deadline the dial pends
+        // for the lifetime of the runtime holding the task and the socket.
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("local addr").port();
+        let _blackhole = tokio::spawn(async move {
+            let _held = listener.accept().await;
+            // INVARIANT: hold the accepted socket open for the test's
+            // duration. Dropping it would send a reset and surface a TLS
+            // error instead of the hang under test.
+            std::future::pending::<()>().await;
+        });
+
+        // WireConfig is #[non_exhaustive], so it cannot be built with a struct
+        // expression from outside hamma-core.
+        let mut cfg = WireConfig::default();
+        cfg.connect_timeout_ms = 150;
+        let url = format!("https://127.0.0.1:{port}");
+
+        // WHY the outer timeout: it is the falsifier. Without the deadline in
+        // `with_connect_deadline` the inner call never returns, and this test
+        // fails in five seconds instead of hanging the suite.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            fetch_server_key_with_config(&url, &cfg),
+        )
+        .await;
+
+        let Ok(result) = outcome else {
+            panic!("dial ignored its own 150 ms deadline");
+        };
+        match result {
+            Err(WireError::ConnectTimeout { millis }) => assert_eq!(millis, 150),
+            Err(other) => panic!("expected ConnectTimeout, got: {other}"),
+            Ok(_) => panic!("expected ConnectTimeout, got a server key"),
+        }
     }
 
     #[test]

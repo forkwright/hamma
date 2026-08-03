@@ -20,7 +20,7 @@
         {
           "type": "toml",
           "path": "Cargo.toml",
-          "jsonpath": "$.workspace.dependencies.hamma-core.version"
+          "jsonpath": "$.workspace.dependencies[?(@.path)].version"
         },
         {
           "type": "toml",

@@ -17,16 +17,27 @@
 //! - `control/controlclient/direct.go` in the Tailscale Go source
 //! - `tailcfg/tailcfg.go` for type definitions
 
+use std::collections::HashSet;
+
 use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use hamma_core::types::{
     AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, PeerChange, PeerRemoval,
     RegisterRequest, RegisterResponse,
 };
 use snafu::Snafu;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::transport::ControlConnection;
 use crate::wire::AsyncControlStream;
+
+/// Upper bound on the peers a netmap retains from a coordination server.
+///
+/// WHY: every peer-bearing field of a [`MapResponse`] is server-controlled and
+/// unbounded on the wire, so a misbehaving or hostile server can grow
+/// [`Netmap::peers`] without limit across a single connection. The cap sits far
+/// above any realistic tailnet, so it is unreachable in normal operation and
+/// only bounds the memory one connection can commit.
+const MAX_PEERS: usize = 10_000;
 
 /// Errors from control protocol operations.
 #[derive(Debug, Snafu)]
@@ -58,6 +69,13 @@ pub enum ControlError {
     Wire {
         /// The underlying wire error.
         source: crate::wire::WireError,
+    },
+
+    /// The payload does not fit the control frame's 4-byte length prefix.
+    #[snafu(display("payload of {len} bytes exceeds the u32 frame length prefix"))]
+    PayloadTooLarge {
+        /// Length of the payload that could not be framed.
+        len: usize,
     },
 }
 
@@ -138,9 +156,12 @@ impl Netmap {
             online: None,
         });
 
+        let mut peers = resp.peers.unwrap_or_default();
+        cap_peers(&mut peers);
+
         Self {
             self_node,
-            peers: resp.peers.unwrap_or_default(),
+            peers,
             dns_config: resp.dns_config,
             derp_map: resp.derp_map,
         }
@@ -155,25 +176,39 @@ impl Netmap {
         }
 
         // Full peer replacement (if server sends full list again).
-        if let Some(peers) = resp.peers {
+        if let Some(mut peers) = resp.peers {
+            cap_peers(&mut peers);
             self.peers = peers;
         }
 
         // Incremental peer additions/changes.
         if let Some(changed) = resp.peers_changed {
+            // WHY: counted rather than warned per peer, so a server sending a
+            // large over-cap delta costs one log line instead of one per peer.
+            let mut refused = 0usize;
             for changed_peer in changed {
                 if let Some(existing) = self.peers.iter_mut().find(|p| p.key == changed_peer.key) {
+                    // WHY: an update to a peer already held is not growth, so it
+                    // still applies once the netmap has reached the cap.
                     *existing = changed_peer;
-                } else {
+                } else if self.peers.len() < MAX_PEERS {
                     self.peers.push(changed_peer);
+                } else {
+                    refused += 1;
                 }
+            }
+            if refused > 0 {
+                warn!(
+                    cap = MAX_PEERS,
+                    refused, "netmap is at the peer cap; refused new peers from a map response"
+                );
             }
         }
 
         // Peer removals.
         if let Some(removals) = resp.peers_removed {
-            self.peers
-                .retain(|peer| !removals.iter().any(|removal| removes_peer(removal, peer)));
+            let index = PeerRemovalIndex::build(&removals);
+            self.peers.retain(|peer| !index.removes(peer));
         }
 
         if let Some(changes) = resp.peers_changed_patch {
@@ -290,7 +325,7 @@ impl ControlClient {
             "sending register request",
         );
         let payload = self.build_register_request(auth_key)?;
-        let framed = frame_message(&payload);
+        let framed = frame_message(&payload)?;
         stream.send_message(&framed).await?;
 
         let raw = stream.recv_message().await?;
@@ -339,7 +374,7 @@ impl ControlClient {
             followup: Some(followup_url.to_string()),
         };
         let payload = serde_json::to_vec(&req)?;
-        let framed = frame_message(&payload);
+        let framed = frame_message(&payload)?;
         stream.send_message(&framed).await?;
 
         let raw = stream.recv_message().await?;
@@ -364,7 +399,7 @@ impl ControlClient {
             "sending streaming map request",
         );
         let payload = self.build_map_request()?;
-        let framed = frame_message(&payload);
+        let framed = frame_message(&payload)?;
         stream.send_message(&framed).await?;
         Ok(())
     }
@@ -468,6 +503,10 @@ impl ControlClient {
     /// - `node`: updates the self node if present.
     /// - `dns_config` and `derp_map`: replace the previous values if
     ///   present.
+    ///
+    /// The retained peer list is bounded by [`MAX_PEERS`]: an over-cap list is
+    /// truncated and additions past the cap are refused. Updates to peers
+    /// already held still apply, since they do not grow the list.
     pub fn apply_map_response(&mut self, resp: MapResponse) {
         if resp.keep_alive == Some(true) {
             return;
@@ -551,10 +590,56 @@ fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
     }
 }
 
-fn removes_peer(removal: &PeerRemoval, peer: &Node) -> bool {
-    match removal {
-        PeerRemoval::NodeId(node_id) => peer.id == *node_id,
-        PeerRemoval::NodeKey(key) => peer.key == *key,
+/// Truncate a server-supplied peer list to [`MAX_PEERS`].
+///
+/// WHY: shared by both paths that accept a whole list from the server, so the
+/// cap cannot be enforced on one and forgotten on the other.
+fn cap_peers(peers: &mut Vec<Node>) {
+    if peers.len() > MAX_PEERS {
+        let dropped = peers.len() - MAX_PEERS;
+        warn!(
+            cap = MAX_PEERS,
+            dropped, "map response exceeded the peer cap; dropped the excess peers"
+        );
+        peers.truncate(MAX_PEERS);
+    }
+}
+
+/// O(1) membership test over a server-supplied peer-removal list.
+///
+/// WHY: both the peer list and the removal list arrive from the coordination
+/// server, so scanning the removals once per peer is O(n*m) work a server can
+/// demand at will by sending a large delta. Indexing the removals first makes
+/// the sweep linear in the peer count regardless of how many removals arrive.
+struct PeerRemovalIndex<'a> {
+    node_ids: HashSet<i64>,
+    node_keys: HashSet<&'a str>,
+}
+
+impl<'a> PeerRemovalIndex<'a> {
+    /// Index a removal list by the two identifiers it can name a peer with.
+    fn build(removals: &'a [PeerRemoval]) -> Self {
+        let mut node_ids = HashSet::new();
+        let mut node_keys = HashSet::new();
+        for removal in removals {
+            match removal {
+                PeerRemoval::NodeId(node_id) => {
+                    node_ids.insert(*node_id);
+                }
+                PeerRemoval::NodeKey(key) => {
+                    node_keys.insert(key.as_str());
+                }
+            }
+        }
+        Self {
+            node_ids,
+            node_keys,
+        }
+    }
+
+    /// Whether this removal set names `peer`, by node ID or by node key.
+    fn removes(&self, peer: &Node) -> bool {
+        self.node_ids.contains(&peer.id) || self.node_keys.contains(peer.key.as_str())
     }
 }
 
@@ -567,12 +652,32 @@ fn gethostname() -> String {
 }
 
 /// Frame a JSON payload as `[4B LE size][payload]` for the control wire format.
-fn frame_message(payload: &[u8]) -> Vec<u8> {
-    let size = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+///
+/// # Errors
+///
+/// Returns [`ControlError::PayloadTooLarge`] if the payload does not fit the
+/// 4-byte length prefix. Clamping instead would write a length that disagrees
+/// with the bytes that follow, desynchronising the peer's framing for the rest
+/// of the connection.
+fn frame_message(payload: &[u8]) -> Result<Vec<u8>, ControlError> {
+    let size = frame_len(payload.len())?;
     let mut framed = Vec::with_capacity(4 + payload.len());
     framed.extend_from_slice(&size.to_le_bytes());
     framed.extend_from_slice(payload);
-    framed
+    Ok(framed)
+}
+
+/// Narrow a payload length to the frame's 4-byte length prefix.
+///
+/// WHY: split out from [`frame_message`] so the rejection path is reachable in
+/// a test - exercising it through `frame_message` would mean allocating a
+/// payload larger than `u32::MAX`.
+///
+/// # Errors
+///
+/// Returns [`ControlError::PayloadTooLarge`] if `len` exceeds `u32::MAX`.
+fn frame_len(len: usize) -> Result<u32, ControlError> {
+    u32::try_from(len).map_err(|_| ControlError::PayloadTooLarge { len })
 }
 
 fn decode_map_payload(payload: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, ControlError> {
