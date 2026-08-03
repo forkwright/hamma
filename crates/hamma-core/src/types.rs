@@ -220,10 +220,6 @@ pub struct MapResponse {
 /// variant preserves compatibility with older key-string frames.
 // WHY: variant names match Tailscale control-protocol wire identifiers;
 // renaming would diverge from protocol documentation and break serde mappings.
-#[allow(
-    clippy::enum_variant_names,
-    reason = "PeerRemoval variants mirror Tailscale control-protocol wire names"
-)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "PeerRemovalWire")]
 pub enum PeerRemoval {

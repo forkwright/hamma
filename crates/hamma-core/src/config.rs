@@ -30,6 +30,8 @@
 //! `Default` impl (and then mutate fields) or by using [`serde`] to load from
 //! a file.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -59,6 +61,15 @@ pub const DEFAULT_HEADER_READ_INITIAL_CAPACITY: usize = 512;
 ///
 /// Matches a common page size and plays well with TLS record sizes.
 pub const DEFAULT_RESPONSE_READ_CHUNK_BYTES: usize = 4096;
+
+/// Default deadline for establishing a control connection (10 s).
+///
+/// Covers the whole establishment sequence - TCP connect, TLS handshake,
+/// HTTP upgrade, and the Noise response frame - not each step separately.
+/// Ten seconds accommodates a slow intercontinental path with a cold TLS
+/// session while still releasing the task promptly when a control server
+/// blackholes the connection.
+pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
 
 /// Default cap on a single Noise transport frame payload (4 KiB plaintext).
 ///
@@ -119,6 +130,32 @@ pub struct WireConfig {
     /// **Default:** 4 KiB. Increase for high-throughput links; decrease for
     /// memory-constrained environments.
     pub response_read_chunk_bytes: usize,
+
+    /// Deadline for the whole control-connection establishment, in
+    /// milliseconds.
+    ///
+    /// **Controls:** how long a dial may pend before the task and socket are
+    /// released. Spans TCP connect, TLS handshake, HTTP upgrade, and the
+    /// Noise response frame as one budget, so a peer cannot stall
+    /// indefinitely by dribbling one step at a time.
+    /// **Range:** `[1_000, 120_000]` - below 1 s spuriously fails slow but
+    /// healthy links; above 2 min defeats the purpose.
+    /// **Default:** 10 s. Raise for high-latency or lossy paths; lower where
+    /// a control server is expected to be nearby and fast failover matters.
+    /// `0` disables the deadline, restoring the unbounded pre-#52 behaviour.
+    ///
+    /// WHY(serde default): every other field here is required, but this one
+    /// was added after configs were already being persisted. Without a
+    /// default, `deny_unknown_fields` plus a missing key would reject every
+    /// `wire` table written before #52 — a config-parse regression strictly
+    /// worse than the hang it fixes.
+    #[serde(default = "default_connect_timeout_ms")]
+    pub connect_timeout_ms: u64,
+}
+
+/// Serde default for [`WireConfig::connect_timeout_ms`].
+fn default_connect_timeout_ms() -> u64 {
+    DEFAULT_CONNECT_TIMEOUT_MS
 }
 
 impl Default for WireConfig {
@@ -128,6 +165,7 @@ impl Default for WireConfig {
             key_response_body_multiplier: DEFAULT_KEY_RESPONSE_BODY_MULTIPLIER,
             header_read_initial_capacity: DEFAULT_HEADER_READ_INITIAL_CAPACITY,
             response_read_chunk_bytes: DEFAULT_RESPONSE_READ_CHUNK_BYTES,
+            connect_timeout_ms: DEFAULT_CONNECT_TIMEOUT_MS,
         }
     }
 }
@@ -140,6 +178,16 @@ impl WireConfig {
     pub fn key_response_max_bytes(&self) -> usize {
         self.max_header_bytes
             .saturating_mul(self.key_response_body_multiplier)
+    }
+
+    /// Return the connection-establishment deadline, or `None` when disabled.
+    ///
+    /// `connect_timeout_ms == 0` means "no deadline"; callers must then dial
+    /// without a timeout wrapper rather than applying a zero-length one,
+    /// which would fail every connection immediately.
+    #[must_use]
+    pub fn connect_timeout(&self) -> Option<Duration> {
+        (self.connect_timeout_ms != 0).then(|| Duration::from_millis(self.connect_timeout_ms))
     }
 }
 
@@ -280,6 +328,7 @@ mod tests {
                 key_response_body_multiplier: 2,
                 header_read_initial_capacity: 1024,
                 response_read_chunk_bytes: 8192,
+                connect_timeout_ms: 30_000,
             },
             noise: NoiseConfig {
                 max_frame_payload: 8192,
@@ -289,6 +338,38 @@ mod tests {
         let json = serde_json::to_string(&original).expect("serialise");
         let back: Config = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(original, back);
+    }
+
+    #[test]
+    fn connect_timeout_is_some_by_default() {
+        assert_eq!(
+            WireConfig::default().connect_timeout(),
+            Some(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
+        );
+    }
+
+    #[test]
+    fn connect_timeout_zero_disables_the_deadline() {
+        let c = WireConfig {
+            connect_timeout_ms: 0,
+            ..Default::default()
+        };
+        // A zero-length timeout would fail every dial instantly, so zero must
+        // mean "no deadline" rather than "expire immediately".
+        assert_eq!(c.connect_timeout(), None);
+    }
+
+    #[test]
+    fn wire_table_written_before_the_timeout_field_still_loads() {
+        // A `wire` table persisted before #52 has no `connect_timeout_ms`.
+        // With `deny_unknown_fields` and no serde default it would be
+        // rejected outright.
+        let pre_52 = r#"{"wire": {"max_header_bytes": 2048,
+            "key_response_body_multiplier": 4,
+            "header_read_initial_capacity": 512,
+            "response_read_chunk_bytes": 4096}}"#;
+        let c: Config = serde_json::from_str(pre_52).expect("pre-#52 config must still parse");
+        assert_eq!(c.wire.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS);
     }
 
     #[test]

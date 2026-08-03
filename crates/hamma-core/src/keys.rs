@@ -26,15 +26,24 @@ pub enum KeyError {
     MissingPrefix {
         /// The expected prefix.
         prefix: String,
-        /// The full input string.
+        /// The leading bytes of the input, truncated to [`MAX_REPORTED_INPUT`].
         input: String,
     },
 
-    /// The hex portion of the key is not valid.
-    #[snafu(display("invalid hex in key: {message}"))]
-    InvalidHex {
-        /// Description of the hex error.
-        message: String,
+    /// The hex portion of the key has an odd number of digits.
+    #[snafu(display("invalid hex in key: odd number of hex digits ({len})"))]
+    OddHexLength {
+        /// The digit count that could not be split into byte pairs.
+        len: usize,
+    },
+
+    /// The hex portion of the key contains a character that is not a hex digit.
+    #[snafu(display("invalid hex in key: invalid hex digit {digit:?} at offset {offset}"))]
+    InvalidHexDigit {
+        /// The offending character.
+        digit: char,
+        /// Its zero-based offset within the hex portion.
+        offset: usize,
     },
 
     /// The decoded key is not the expected length.
@@ -45,6 +54,20 @@ pub enum KeyError {
         /// Actual byte count.
         actual: usize,
     },
+}
+
+/// Upper bound on how many characters of caller-supplied text a [`KeyError`]
+/// retains.
+///
+/// WHY: `from_hex` is called with server-supplied strings, so the error value
+/// must not clone an input of unbounded size. A well-formed key is a prefix of
+/// at most nine characters plus `KEY_LEN * 2` hex digits, so this bound keeps
+/// every legitimate input intact while capping a hostile one.
+const MAX_REPORTED_INPUT: usize = 80;
+
+/// Copy at most [`MAX_REPORTED_INPUT`] characters of `s` for use in an error.
+fn truncate_for_report(s: &str) -> String {
+    s.chars().take(MAX_REPORTED_INPUT).collect()
 }
 
 /// Length of all Curve25519 keys in bytes.
@@ -151,6 +174,26 @@ macro_rules! key_pair {
                 let hex = hex_encode(&self.0);
                 format!("{}{hex}", $pub_prefix)
             }
+
+            /// Parse from the Tailscale prefixed-hex format for this key type.
+            ///
+            /// The inverse of [`Self::to_hex`]. Used to validate the
+            /// server-supplied key strings carried in control-plane JSON at
+            /// the point they are read, rather than passing them on as text.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`KeyError`] if the prefix is missing, the hex portion
+            /// is malformed, or it does not decode to exactly 32 bytes.
+            pub fn from_hex(s: &str) -> Result<Self, KeyError> {
+                let hex = s
+                    .strip_prefix($pub_prefix)
+                    .ok_or_else(|| KeyError::MissingPrefix {
+                        prefix: $pub_prefix.to_string(),
+                        input: truncate_for_report(s),
+                    })?;
+                Ok(Self(hex_decode_exact(hex)?))
+            }
         }
     };
 }
@@ -187,41 +230,6 @@ key_pair! {
 }
 
 // ---------------------------------------------------------------------------
-// MachinePublic: additional parsing support
-// ---------------------------------------------------------------------------
-
-impl MachinePublic {
-    /// Parse a `MachinePublic` from the Tailscale `"mkey:hexhex..."` format.
-    ///
-    /// This is used to deserialize the server's public key returned by
-    /// `GET /key?v=N`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`KeyError`] if the prefix is missing, the hex is invalid, or
-    /// the decoded length is not 32 bytes.
-    pub fn from_hex(s: &str) -> Result<Self, KeyError> {
-        let prefix = "mkey:";
-        let hex = s
-            .strip_prefix(prefix)
-            .ok_or_else(|| KeyError::MissingPrefix {
-                prefix: prefix.to_string(),
-                input: s.to_string(),
-            })?;
-        let bytes = hex_decode(hex)?;
-        if bytes.len() != KEY_LEN {
-            return Err(KeyError::WrongLength {
-                expected: KEY_LEN,
-                actual: bytes.len(),
-            });
-        }
-        let mut arr = [0u8; KEY_LEN];
-        arr.copy_from_slice(&bytes);
-        Ok(Self(arr))
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Hex encoding helper (avoids pulling in the `hex` crate for one function)
 // ---------------------------------------------------------------------------
 
@@ -234,34 +242,41 @@ fn hex_encode(bytes: &[u8]) -> String {
     s
 }
 
-fn hex_decode(s: &str) -> Result<Vec<u8>, KeyError> {
-    if !s.len().is_multiple_of(2) {
-        return Err(KeyError::InvalidHex {
-            message: "odd number of hex digits".to_string(),
+/// Decode `s` into exactly `N` bytes of hex.
+///
+/// WHY: the digit count is checked against `N` before anything is allocated,
+/// so a server-supplied string cannot make the caller reserve memory
+/// proportional to its own length before being rejected.
+fn hex_decode_exact<const N: usize>(s: &str) -> Result<[u8; N], KeyError> {
+    let (pairs, rest) = s.as_bytes().as_chunks::<2>();
+    if !rest.is_empty() {
+        return Err(KeyError::OddHexLength { len: s.len() });
+    }
+    if pairs.len() != N {
+        return Err(KeyError::WrongLength {
+            expected: N,
+            actual: pairs.len(),
         });
     }
-    let mut bytes = Vec::with_capacity(s.len() / 2);
-    for chunk in s.as_bytes().chunks_exact(2) {
-        // chunks_exact(2) on an even-length &[u8] always yields 2-byte slices.
-        let hi_byte = *chunk.first().ok_or_else(|| KeyError::InvalidHex {
-            message: "chunk missing first nibble".to_string(),
-        })?;
-        let lo_byte = *chunk.get(1).ok_or_else(|| KeyError::InvalidHex {
-            message: "chunk missing second nibble".to_string(),
-        })?;
-        let hi = hex_nibble(hi_byte).map_err(|e| KeyError::InvalidHex { message: e })?;
-        let lo = hex_nibble(lo_byte).map_err(|e| KeyError::InvalidHex { message: e })?;
-        bytes.push((hi << 4) | lo);
+
+    let mut out = [0u8; N];
+    for (index, (byte, &[hi_digit, lo_digit])) in out.iter_mut().zip(pairs).enumerate() {
+        let hi = hex_nibble(hi_digit, index * 2)?;
+        let lo = hex_nibble(lo_digit, (index * 2) + 1)?;
+        *byte = (hi << 4) | lo;
     }
-    Ok(bytes)
+    Ok(out)
 }
 
-fn hex_nibble(b: u8) -> Result<u8, String> {
+fn hex_nibble(b: u8, offset: usize) -> Result<u8, KeyError> {
     match b {
         b'0'..=b'9' => Ok(b - b'0'),
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(format!("invalid hex digit: {}", b as char)),
+        _ => Err(KeyError::InvalidHexDigit {
+            digit: b as char,
+            offset,
+        }),
     }
 }
 
@@ -366,6 +381,106 @@ mod tests {
         let bytes = *priv_key.as_bytes();
         let restored = DiscoPrivate::from_bytes(bytes);
         assert_eq!(priv_key.public_key(), restored.public_key());
+    }
+
+    // -----------------------------------------------------------------------
+    // Parsing: prefix, digit and length rejection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wrong_length_is_rejected_before_any_digit_is_examined() {
+        // A long run of non-hex digits at a length that cannot be a key. The
+        // length verdict must win, which is only true if the count is checked
+        // before the decode loop runs.
+        let input = format!("mkey:{}", "zz".repeat(1000));
+        let err = MachinePublic::from_hex(&input).expect_err("wrong length rejected");
+        assert!(
+            matches!(
+                err,
+                KeyError::WrongLength {
+                    expected: KEY_LEN,
+                    actual: 1000
+                }
+            ),
+            "expected a length verdict, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_prefix_error_bounds_the_input_it_retains() {
+        let input = format!("bogus:{}", "a".repeat(10_000));
+        let err = MachinePublic::from_hex(&input).expect_err("bad prefix rejected");
+        let KeyError::MissingPrefix { input: kept, .. } = err else {
+            panic!("expected MissingPrefix, got {err:?}");
+        };
+        assert_eq!(
+            kept.chars().count(),
+            MAX_REPORTED_INPUT,
+            "error retained {} chars of a 10006-char input",
+            kept.chars().count()
+        );
+    }
+
+    #[test]
+    fn invalid_hex_digit_reports_the_character_and_its_offset() {
+        let input = format!("mkey:{}0z", "0".repeat(62));
+        let err = MachinePublic::from_hex(&input).expect_err("bad digit rejected");
+        assert!(
+            matches!(
+                err,
+                KeyError::InvalidHexDigit {
+                    digit: 'z',
+                    offset: 63
+                }
+            ),
+            "expected a located digit error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn odd_digit_count_is_its_own_variant() {
+        let err = MachinePublic::from_hex("mkey:abc").expect_err("odd length rejected");
+        assert!(
+            matches!(err, KeyError::OddHexLength { len: 3 }),
+            "expected an odd-length verdict, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn every_public_key_type_parses_its_own_prefixed_hex() {
+        let machine = MachinePrivate::generate().public_key();
+        let node = NodePrivate::generate().public_key();
+        let disco = DiscoPrivate::generate().public_key();
+
+        assert_eq!(
+            MachinePublic::from_hex(&machine.to_hex()).expect("mkey round-trip"),
+            machine
+        );
+        assert_eq!(
+            NodePublic::from_hex(&node.to_hex()).expect("nodekey round-trip"),
+            node
+        );
+        assert_eq!(
+            DiscoPublic::from_hex(&disco.to_hex()).expect("discokey round-trip"),
+            disco
+        );
+    }
+
+    #[test]
+    fn a_public_key_type_rejects_another_types_prefix() {
+        let node_hex = NodePrivate::generate().public_key().to_hex();
+
+        let err = DiscoPublic::from_hex(&node_hex).expect_err("nodekey is not a discokey");
+        assert!(
+            matches!(err, KeyError::MissingPrefix { ref prefix, .. } if prefix == "discokey:"),
+            "expected a discokey prefix demand, got {err:?}"
+        );
+
+        let err = MachinePublic::from_hex(&node_hex).expect_err("nodekey is not an mkey");
+        assert!(
+            matches!(err, KeyError::MissingPrefix { ref prefix, .. } if prefix == "mkey:"),
+            "expected an mkey prefix demand, got {err:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
