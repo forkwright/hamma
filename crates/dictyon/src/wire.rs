@@ -876,6 +876,22 @@ fn find_header_end(buf: &[u8], scanned: usize) -> Option<usize> {
         .map(|p| p + from)
 }
 
+/// Append `slice` to `buf`, refusing the append if it would exceed `max_body`.
+///
+/// INVARIANT: on error `buf` is left untouched, so the accumulated response
+/// never occupies more than `max_body` bytes. Checking after the append would
+/// still reject the response, but only once the process had already committed
+/// to holding it — a server-controlled overshoot of up to one chunk.
+fn push_within_limit(buf: &mut Vec<u8>, slice: &[u8], max_body: usize) -> Result<(), WireError> {
+    if buf.len().saturating_add(slice.len()) > max_body {
+        return Err(WireError::KeyParse {
+            message: "response too large".to_string(),
+        });
+    }
+    buf.extend_from_slice(slice);
+    Ok(())
+}
+
 /// Read the full HTTP/1.1 response body (for the /key endpoint).
 async fn read_full_response(
     stream: &mut tokio_rustls::client::TlsStream<TcpStream>,
@@ -891,14 +907,9 @@ async fn read_full_response(
                 let slice = chunk.get(..n).ok_or_else(|| WireError::KeyParse {
                     message: "read returned more bytes than buffer".to_string(),
                 })?;
-                buf.extend_from_slice(slice);
+                push_within_limit(&mut buf, slice, max_body)?;
             }
             Err(e) => return Err(WireError::Tls { source: e }),
-        }
-        if buf.len() > max_body {
-            return Err(WireError::KeyParse {
-                message: "response too large".to_string(),
-            });
         }
     }
     Ok(buf)
@@ -1235,5 +1246,43 @@ mod tests {
         let response = b"HTTP/1.1 200 OK\r\n\r\n{}";
         let result = parse_server_key_response(response);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn push_within_limit_accepts_up_to_the_limit() {
+        let mut buf = vec![0u8; 8];
+        let result = push_within_limit(&mut buf, &[1u8; 2], 10);
+        assert!(
+            result.is_ok(),
+            "an append reaching exactly max_body is fine"
+        );
+        assert_eq!(buf.len(), 10);
+    }
+
+    #[test]
+    fn push_within_limit_rejects_without_growing_the_buffer() {
+        // WHY: the guard must reject *before* appending. Checking after the
+        // append also returns an error, so asserting only on the error cannot
+        // tell the two apart -- the buffer length at the point of rejection is
+        // the observable that separates them.
+        let mut buf = vec![0u8; 8];
+        let result = push_within_limit(&mut buf, &[1u8; 8], 10);
+        assert!(result.is_err(), "8 + 8 exceeds max_body of 10");
+        assert_eq!(
+            buf.len(),
+            8,
+            "rejected chunk must not be committed to the buffer"
+        );
+    }
+
+    #[test]
+    fn push_within_limit_rejects_a_single_oversized_chunk() {
+        let mut buf = Vec::new();
+        let result = push_within_limit(&mut buf, &[1u8; 64], 10);
+        assert!(result.is_err());
+        assert!(
+            buf.is_empty(),
+            "nothing is accumulated for an over-limit read"
+        );
     }
 }
