@@ -284,15 +284,19 @@ async fn handle_noise_upgrade(
     let framed_msg2 = frame_noise_response(&noise_msg2[..msg2_len]);
 
     // Send HTTP 101 with the Noise response in the body.
+    //
+    // WHY: one write, as a real control server does. The client's header read
+    // then captures part of the Noise frame in the same chunk, which is the
+    // case that silently corrupted the handshake when those bytes were
+    // discarded.
     let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: tailscale-control-protocol\r\nConnection: Upgrade\r\n\r\n";
+    let mut upgrade = Vec::with_capacity(response.len() + framed_msg2.len());
+    upgrade.extend_from_slice(response.as_bytes());
+    upgrade.extend_from_slice(&framed_msg2);
     stream
-        .write_all(response.as_bytes())
+        .write_all(&upgrade)
         .await
-        .expect("write 101 response");
-    stream
-        .write_all(&framed_msg2)
-        .await
-        .expect("write noise msg2");
+        .expect("write 101 response and noise msg2");
     stream.flush().await.expect("flush after handshake");
 
     responder
