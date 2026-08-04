@@ -33,6 +33,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use snafu::{Snafu, ensure};
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -86,6 +87,123 @@ pub const DEFAULT_MAX_FRAME_PAYLOAD: usize = 4096;
 pub const DEFAULT_HANDSHAKE_SCRATCH_BYTES: usize = 256;
 
 // ---------------------------------------------------------------------------
+// Bounds
+// ---------------------------------------------------------------------------
+//
+// NOTE: the **Range:** line on each field doc is the contract; these constants
+// make it executable. Prose bounds that nothing enforces are how a persisted
+// config comes to claim a value the code cannot honour.
+
+/// Bytes the Noise AEAD tag adds to every transport frame.
+///
+/// WHY: `dictyon::noise` owns the tag itself - this crate owns only the bound
+/// the tag imposes on configuration, because the bound must be checkable
+/// without depending on `dictyon`. `dictyon::noise::tests` pins the two
+/// together so they cannot drift apart silently.
+const NOISE_FRAME_TAG_OVERHEAD: usize = 16;
+
+/// Largest plaintext payload a `u16` Noise frame length can describe.
+///
+/// The frame header carries a `u16` covering plaintext plus AEAD tag, so the
+/// plaintext ceiling is `u16::MAX - NOISE_FRAME_TAG_OVERHEAD`.
+// kanon:ignore RUST/as-cast -- widening u16 -> usize, infallible by construction;
+// `usize::from` is not callable in a const item on stable.
+pub const MAX_FRAME_PAYLOAD_CEILING: usize = u16::MAX as usize - NOISE_FRAME_TAG_OVERHEAD;
+
+/// Smallest Noise frame payload that leaves room for a control message.
+pub const MIN_FRAME_PAYLOAD: usize = 256;
+
+/// Inclusive bounds on [`NoiseConfig::handshake_scratch_bytes`].
+const HANDSHAKE_SCRATCH_BOUNDS: (usize, usize) = (128, 4096);
+
+/// Inclusive bounds on [`WireConfig::max_header_bytes`].
+const MAX_HEADER_BYTES_BOUNDS: (usize, usize) = (1024, 65_536);
+
+/// Inclusive bounds on [`WireConfig::key_response_body_multiplier`].
+const KEY_RESPONSE_BODY_MULTIPLIER_BOUNDS: (usize, usize) = (1, 16);
+
+/// Inclusive lower bound on [`WireConfig::header_read_initial_capacity`]; the
+/// upper bound is `max_header_bytes`, so it is not a constant.
+const HEADER_READ_INITIAL_CAPACITY_MIN: usize = 64;
+
+/// Inclusive bounds on [`WireConfig::response_read_chunk_bytes`].
+const RESPONSE_READ_CHUNK_BYTES_BOUNDS: (usize, usize) = (512, 65_536);
+
+/// Inclusive bounds on a nonzero [`WireConfig::connect_timeout_ms`].
+///
+/// `0` is a distinct sentinel (disables the deadline) and is not part of
+/// this range - see [`check_connect_timeout_ms`].
+const CONNECT_TIMEOUT_MS_BOUNDS: (u64, u64) = (1_000, 120_000);
+
+// ---------------------------------------------------------------------------
+// Error type
+// ---------------------------------------------------------------------------
+
+/// Errors produced when a configuration value violates its documented range.
+#[derive(Debug, Clone, PartialEq, Eq, Snafu)]
+#[non_exhaustive]
+pub enum ConfigError {
+    /// A tuning knob fell outside its documented inclusive range.
+    #[snafu(display("{field} must be in [{min}, {max}], got {value}"))]
+    OutOfRange {
+        /// Name of the offending field, as written in [`Config`].
+        field: &'static str,
+        /// Inclusive lower bound.
+        min: usize,
+        /// Inclusive upper bound.
+        max: usize,
+        /// The rejected value.
+        value: usize,
+    },
+}
+
+/// Reject `value` unless it lies within the inclusive range `[min, max]`.
+fn check_range(
+    field: &'static str,
+    value: usize,
+    (min, max): (usize, usize),
+) -> Result<(), ConfigError> {
+    ensure!(
+        (min..=max).contains(&value),
+        OutOfRangeSnafu {
+            field,
+            min,
+            max,
+            value
+        }
+    );
+    Ok(())
+}
+
+/// Reject a nonzero `value` outside [`CONNECT_TIMEOUT_MS_BOUNDS`].
+///
+/// `0` (disables the deadline) always passes - it is a sentinel, not a
+/// point in the range.
+fn check_connect_timeout_ms(value: u64) -> Result<(), ConfigError> {
+    if value == 0 {
+        return Ok(());
+    }
+    let (min, max) = CONNECT_TIMEOUT_MS_BOUNDS;
+    ensure!(
+        (min..=max).contains(&value),
+        OutOfRangeSnafu {
+            field: "wire.connect_timeout_ms",
+            // WHY try_from: `min`/`max` are `u64` bounds narrowing to the
+            // `usize` field type; both are small literals (<=120_000) so the
+            // fallback never triggers in practice, but `try_from` keeps the
+            // reported bound honest instead of silently wrapping on a
+            // 32-bit target the way a raw `as usize` cast would.
+            min: usize::try_from(min).unwrap_or(usize::MAX),
+            max: usize::try_from(max).unwrap_or(usize::MAX),
+            // `value` is the out-of-range input itself (that is what
+            // triggered this branch), so it gets the same treatment.
+            value: usize::try_from(value).unwrap_or(usize::MAX),
+        }
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // WireConfig
 // ---------------------------------------------------------------------------
 
@@ -94,7 +212,7 @@ pub const DEFAULT_HANDSHAKE_SCRATCH_BYTES: usize = 256;
 /// Applies to [`dictyon::wire`](../../dictyon/wire/index.html) - the module
 /// that owns raw socket I/O and the HTTP upgrade handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "WireConfigFields", deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WireConfig {
     /// Maximum HTTP response header block we will buffer, in bytes.
@@ -180,6 +298,41 @@ impl WireConfig {
             .saturating_mul(self.key_response_body_multiplier)
     }
 
+    /// Check every field against its documented range.
+    ///
+    /// Deserialization runs this automatically; call it directly after
+    /// mutating a [`WireConfig`] built from [`Default`].
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::OutOfRange`] naming the first field that violates its
+    /// documented bounds.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        check_range(
+            "wire.max_header_bytes",
+            self.max_header_bytes,
+            MAX_HEADER_BYTES_BOUNDS,
+        )?;
+        check_range(
+            "wire.key_response_body_multiplier",
+            self.key_response_body_multiplier,
+            KEY_RESPONSE_BODY_MULTIPLIER_BOUNDS,
+        )?;
+        // NOTE: the upper bound is cross-field - a scan buffer larger than the
+        // cap it feeds is a config the reader can never honour.
+        check_range(
+            "wire.header_read_initial_capacity",
+            self.header_read_initial_capacity,
+            (HEADER_READ_INITIAL_CAPACITY_MIN, self.max_header_bytes),
+        )?;
+        check_range(
+            "wire.response_read_chunk_bytes",
+            self.response_read_chunk_bytes,
+            RESPONSE_READ_CHUNK_BYTES_BOUNDS,
+        )?;
+        check_connect_timeout_ms(self.connect_timeout_ms)
+    }
+
     /// Return the connection-establishment deadline, or `None` when disabled.
     ///
     /// `connect_timeout_ms == 0` means "no deadline"; callers must then dial
@@ -188,6 +341,43 @@ impl WireConfig {
     #[must_use]
     pub fn connect_timeout(&self) -> Option<Duration> {
         (self.connect_timeout_ms != 0).then(|| Duration::from_millis(self.connect_timeout_ms))
+    }
+}
+
+/// Deserialization mirror of [`WireConfig`].
+///
+/// WHY: serde cannot run a validator on a derived `Deserialize`, so the derive
+/// lives here and the public type is reached through [`TryFrom`]. A field added
+/// to [`WireConfig`] and not to this mirror is caught by
+/// `config_roundtrips_through_json` - serialization emits it and
+/// `deny_unknown_fields` here rejects it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireConfigFields {
+    max_header_bytes: usize,
+    key_response_body_multiplier: usize,
+    header_read_initial_capacity: usize,
+    response_read_chunk_bytes: usize,
+    /// WHY(serde default): a `wire` table persisted before #52 has no
+    /// `connect_timeout_ms` key; without a default, `deny_unknown_fields`
+    /// plus a missing key would reject every pre-#52 config outright.
+    #[serde(default = "default_connect_timeout_ms")]
+    connect_timeout_ms: u64,
+}
+
+impl TryFrom<WireConfigFields> for WireConfig {
+    type Error = ConfigError;
+
+    fn try_from(fields: WireConfigFields) -> Result<Self, Self::Error> {
+        let config = Self {
+            max_header_bytes: fields.max_header_bytes,
+            key_response_body_multiplier: fields.key_response_body_multiplier,
+            header_read_initial_capacity: fields.header_read_initial_capacity,
+            response_read_chunk_bytes: fields.response_read_chunk_bytes,
+            connect_timeout_ms: fields.connect_timeout_ms,
+        };
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -201,7 +391,7 @@ impl WireConfig {
 /// pattern, AEAD tag length, and message-type bytes are protocol invariants
 /// and remain `const` inside `dictyon::noise`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "NoiseConfigFields", deny_unknown_fields)]
 #[non_exhaustive]
 pub struct NoiseConfig {
     /// Maximum plaintext payload per Noise transport frame, in bytes.
@@ -234,6 +424,54 @@ impl Default for NoiseConfig {
     }
 }
 
+impl NoiseConfig {
+    /// Check every field against its documented range.
+    ///
+    /// Deserialization runs this automatically; call it directly after
+    /// mutating a [`NoiseConfig`] built from [`Default`].
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::OutOfRange`] naming the first field that violates its
+    /// documented bounds. `max_frame_payload` above
+    /// [`MAX_FRAME_PAYLOAD_CEILING`] is the case that matters: the framing
+    /// layer cannot describe such a frame, so every send would fail at
+    /// runtime rather than at load.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        check_range(
+            "noise.max_frame_payload",
+            self.max_frame_payload,
+            (MIN_FRAME_PAYLOAD, MAX_FRAME_PAYLOAD_CEILING),
+        )?;
+        check_range(
+            "noise.handshake_scratch_bytes",
+            self.handshake_scratch_bytes,
+            HANDSHAKE_SCRATCH_BOUNDS,
+        )
+    }
+}
+
+/// Deserialization mirror of [`NoiseConfig`]; see [`WireConfigFields`].
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NoiseConfigFields {
+    max_frame_payload: usize,
+    handshake_scratch_bytes: usize,
+}
+
+impl TryFrom<NoiseConfigFields> for NoiseConfig {
+    type Error = ConfigError;
+
+    fn try_from(fields: NoiseConfigFields) -> Result<Self, Self::Error> {
+        let config = Self {
+            max_frame_payload: fields.max_frame_payload,
+            handshake_scratch_bytes: fields.handshake_scratch_bytes,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Top-level Config
 // ---------------------------------------------------------------------------
@@ -262,6 +500,19 @@ impl Config {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Check every sub-config against its documented ranges.
+    ///
+    /// Deserialization runs this automatically; call it directly after
+    /// mutating a [`Config`] built from [`Default`].
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::OutOfRange`] naming the first offending field.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        self.wire.validate()?;
+        self.noise.validate()
     }
 }
 
@@ -373,9 +624,10 @@ mod tests {
     }
 
     #[test]
-    fn config_deserialises_from_partial_json() {
-        // Missing sub-tables and fields fall back to defaults because we
-        // use `#[serde(default)]` on Config.
+    fn absent_sub_table_falls_back_to_default() {
+        // NOTE: `#[serde(default)]` on `Config` defaults an absent *sub-table*
+        // only. It does not reach inside a sub-table that is present - see
+        // `present_sub_table_must_be_complete`.
         let partial = r#"{"wire": {"max_header_bytes": 2048,
             "key_response_body_multiplier": 4,
             "header_read_initial_capacity": 512,
@@ -383,6 +635,20 @@ mod tests {
         let c: Config = serde_json::from_str(partial).expect("partial config");
         assert_eq!(c.wire.max_header_bytes, 2048);
         assert_eq!(c.noise, NoiseConfig::default());
+    }
+
+    #[test]
+    fn present_sub_table_must_be_complete() {
+        // WHY: this pins the half of the behaviour the old comment on
+        // `absent_sub_table_falls_back_to_default` got wrong. Neither
+        // `WireConfig` nor its fields carry `#[serde(default)]`, so a `wire`
+        // table that omits a field is an error, not a defaulted value.
+        let missing_field = r#"{"wire": {"max_header_bytes": 2048}}"#;
+        let result: Result<Config, _> = serde_json::from_str(missing_field);
+        assert!(
+            result.is_err(),
+            "a present sub-table missing a field must be rejected, not defaulted"
+        );
     }
 
     #[test]
@@ -395,5 +661,168 @@ mod tests {
             "unexpected": 1}}"#;
         let result: Result<Config, _> = serde_json::from_str(bad);
         assert!(result.is_err(), "unknown field must be rejected");
+    }
+
+    // -----------------------------------------------------------------------
+    // Bounds
+    // -----------------------------------------------------------------------
+
+    /// Build a `Config` JSON document with one `noise.max_frame_payload` value.
+    fn noise_json(max_frame_payload: usize) -> String {
+        format!(
+            r#"{{"noise": {{"max_frame_payload": {max_frame_payload},
+                "handshake_scratch_bytes": 256}}}}"#
+        )
+    }
+
+    #[test]
+    fn defaults_validate() {
+        assert!(
+            Config::default().validate().is_ok(),
+            "the shipped defaults must satisfy their own documented ranges"
+        );
+    }
+
+    #[test]
+    fn frame_payload_ceiling_leaves_room_for_the_tag() {
+        assert_eq!(
+            MAX_FRAME_PAYLOAD_CEILING + NOISE_FRAME_TAG_OVERHEAD,
+            usize::from(u16::MAX),
+            "a full frame must fit the u16 length field exactly"
+        );
+    }
+
+    #[test]
+    fn max_frame_payload_above_wire_ceiling_is_rejected() {
+        // WHY(#55): the documented ceiling was prose only, so a config one byte
+        // over it loaded clean and failed on every send instead of at load.
+        let over = NoiseConfig {
+            max_frame_payload: MAX_FRAME_PAYLOAD_CEILING + 1,
+            handshake_scratch_bytes: DEFAULT_HANDSHAKE_SCRATCH_BYTES,
+        };
+        assert_eq!(
+            over.validate(),
+            Err(ConfigError::OutOfRange {
+                field: "noise.max_frame_payload",
+                min: MIN_FRAME_PAYLOAD,
+                max: MAX_FRAME_PAYLOAD_CEILING,
+                value: MAX_FRAME_PAYLOAD_CEILING + 1,
+            })
+        );
+    }
+
+    #[test]
+    fn max_frame_payload_at_the_ceiling_is_accepted() {
+        let at = NoiseConfig {
+            max_frame_payload: MAX_FRAME_PAYLOAD_CEILING,
+            handshake_scratch_bytes: DEFAULT_HANDSHAKE_SCRATCH_BYTES,
+        };
+        assert!(
+            at.validate().is_ok(),
+            "the ceiling itself must be a legal value"
+        );
+    }
+
+    #[test]
+    fn deserialization_enforces_bounds() {
+        // WHY: validation reachable only through an explicit call is validation
+        // nothing runs. The untrusted entry point is deserialization.
+        let over: Result<Config, _> =
+            serde_json::from_str(&noise_json(MAX_FRAME_PAYLOAD_CEILING + 1));
+        assert!(over.is_err(), "out-of-range value must not deserialize");
+
+        let at: Config = serde_json::from_str(&noise_json(MAX_FRAME_PAYLOAD_CEILING))
+            .expect("the ceiling itself must deserialize");
+        assert_eq!(at.noise.max_frame_payload, MAX_FRAME_PAYLOAD_CEILING);
+    }
+
+    #[test]
+    fn out_of_range_error_names_the_field_and_bounds() {
+        let err = NoiseConfig {
+            max_frame_payload: DEFAULT_MAX_FRAME_PAYLOAD,
+            handshake_scratch_bytes: 1,
+        }
+        .validate()
+        .expect_err("1 is below the scratch-buffer floor");
+        assert_eq!(
+            err.to_string(),
+            "noise.handshake_scratch_bytes must be in [128, 4096], got 1"
+        );
+    }
+
+    #[test]
+    fn wire_bounds_are_enforced_at_both_ends() {
+        let below = WireConfig {
+            max_header_bytes: MAX_HEADER_BYTES_BOUNDS.0 - 1,
+            ..Default::default()
+        };
+        assert!(
+            below.validate().is_err(),
+            "max_header_bytes below the floor must be rejected"
+        );
+
+        let above = WireConfig {
+            max_header_bytes: MAX_HEADER_BYTES_BOUNDS.1 + 1,
+            ..Default::default()
+        };
+        assert!(
+            above.validate().is_err(),
+            "max_header_bytes above the ceiling must be rejected"
+        );
+
+        let multiplier = WireConfig {
+            key_response_body_multiplier: KEY_RESPONSE_BODY_MULTIPLIER_BOUNDS.1 + 1,
+            ..Default::default()
+        };
+        assert!(
+            multiplier.validate().is_err(),
+            "key_response_body_multiplier above its ceiling must be rejected"
+        );
+
+        let chunk = WireConfig {
+            response_read_chunk_bytes: RESPONSE_READ_CHUNK_BYTES_BOUNDS.0 - 1,
+            ..Default::default()
+        };
+        assert!(
+            chunk.validate().is_err(),
+            "response_read_chunk_bytes below its floor must be rejected"
+        );
+    }
+
+    #[test]
+    fn header_scan_buffer_may_not_exceed_the_cap_it_feeds() {
+        // WHY: this bound is cross-field, so a per-field range check cannot see
+        // it - the scan buffer is documented as `[64, max_header_bytes]`.
+        let over = WireConfig {
+            max_header_bytes: 2048,
+            header_read_initial_capacity: 4096,
+            ..Default::default()
+        };
+        assert_eq!(
+            over.validate(),
+            Err(ConfigError::OutOfRange {
+                field: "wire.header_read_initial_capacity",
+                min: HEADER_READ_INITIAL_CAPACITY_MIN,
+                max: 2048,
+                value: 4096,
+            })
+        );
+    }
+
+    #[test]
+    fn saturating_overflow_config_is_now_rejected() {
+        // WHY: `key_response_max_bytes_saturates_on_overflow` above documents
+        // that the arithmetic saturates rather than panics. That remains true,
+        // but such a config can no longer be loaded - the saturation guard is
+        // the second line of defence, not the first.
+        let absurd = WireConfig {
+            max_header_bytes: usize::MAX,
+            key_response_body_multiplier: 4,
+            ..Default::default()
+        };
+        assert!(
+            absurd.validate().is_err(),
+            "a usize::MAX header cap must not survive validation"
+        );
     }
 }

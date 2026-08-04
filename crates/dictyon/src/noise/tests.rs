@@ -8,7 +8,7 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
-use hamma_core::config::DEFAULT_MAX_FRAME_PAYLOAD;
+use hamma_core::config::{DEFAULT_MAX_FRAME_PAYLOAD, MAX_FRAME_PAYLOAD_CEILING};
 
 use super::*;
 
@@ -573,4 +573,19 @@ fn paired_transports() -> (NoiseTransport, NoiseTransport) {
         NoiseTransport::from_snow(client_state),
         NoiseTransport::from_snow(server_state),
     )
+}
+
+#[test]
+fn config_frame_ceiling_matches_this_module_s_tag_length() {
+    // WHY(#55): `hamma_core::config` must reject a `max_frame_payload` the
+    // framing layer here cannot describe, but it cannot depend on `dictyon` to
+    // learn the tag length. It therefore carries its own copy of the overhead.
+    // This pins the two owners together: if `TAG_LEN` ever changes, the config
+    // ceiling stops being derivable from it and this test fails rather than the
+    // bound silently going wrong.
+    assert_eq!(
+        MAX_FRAME_PAYLOAD_CEILING + TAG_LEN,
+        usize::from(u16::MAX),
+        "config's frame ceiling must leave room for exactly one AEAD tag"
+    );
 }
