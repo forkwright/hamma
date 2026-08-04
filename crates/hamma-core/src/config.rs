@@ -188,17 +188,15 @@ fn check_connect_timeout_ms(value: u64) -> Result<(), ConfigError> {
         (min..=max).contains(&value),
         OutOfRangeSnafu {
             field: "wire.connect_timeout_ms",
-            // kanon:ignore RUST/as-cast -- narrowing u64 -> usize; both bounds
-            // are small literals (<=120_000) so this cannot truncate on any
-            // realistic target.
-            min: min as usize,
-            // kanon:ignore RUST/as-cast -- see above.
-            max: max as usize,
-            // WHY saturating: `value` is the out-of-range input itself (that
-            // is what triggered this branch), so unlike `min`/`max` it is not
-            // bounded by the small-literal range - a raw `as usize` cast
-            // would silently wrap on a 32-bit target instead of reporting
-            // the true offending value.
+            // WHY try_from: `min`/`max` are `u64` bounds narrowing to the
+            // `usize` field type; both are small literals (<=120_000) so the
+            // fallback never triggers in practice, but `try_from` keeps the
+            // reported bound honest instead of silently wrapping on a
+            // 32-bit target the way a raw `as usize` cast would.
+            min: usize::try_from(min).unwrap_or(usize::MAX),
+            max: usize::try_from(max).unwrap_or(usize::MAX),
+            // `value` is the out-of-range input itself (that is what
+            // triggered this branch), so it gets the same treatment.
             value: usize::try_from(value).unwrap_or(usize::MAX),
         }
     );
