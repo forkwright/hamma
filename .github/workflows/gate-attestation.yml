@@ -41,7 +41,7 @@
 # fleet default (skip) rather than inventing coverage that doesn't exist yet.
 #
 # WHY system_packages is empty: every crate in the workspace (dictyon,
-# hamma-core) and every workspace dependency (snafu, serde, serde_json,
+# mitos) and every workspace dependency (snafu, serde, serde_json,
 # x25519-dalek, zeroize, rand, tokio, tracing, snow, base64, hostname,
 # rustls[ring backend]/tokio-rustls/webpki-roots, zstd, proptest, rcgen,
 # koinon) is pure Rust or vendors its own C sources (zstd-sys) -- no

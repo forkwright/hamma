@@ -233,11 +233,20 @@ key_pair! {
 // Hex encoding helper (avoids pulling in the `hex` crate for one function)
 // ---------------------------------------------------------------------------
 
+/// Lowercase hex digits, indexed by nibble value (0..=15).
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
 fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for &b in bytes {
-        use fmt::Write;
-        let _ = write!(s, "{b:02x}");
+        // WHY not `write!`: formatting into a `String` cannot fail, which
+        // left the previous `write!` + `let _ =` looking like a discarded
+        // fallible result. A lookup table sidesteps the `Result` entirely
+        // instead of asserting away an error that can never occur.
+        let hi = HEX_DIGITS.get(usize::from(b >> 4)).unwrap_or(&b'0');
+        let lo = HEX_DIGITS.get(usize::from(b & 0x0f)).unwrap_or(&b'0');
+        s.push(char::from(*hi));
+        s.push(char::from(*lo));
     }
     s
 }

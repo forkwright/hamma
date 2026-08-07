@@ -13,8 +13,8 @@
 //!
 //! See `control/controlbase/` in the Tailscale Go source for reference.
 
-use hamma_core::config::NoiseConfig;
-use hamma_core::keys::{MachinePrivate, MachinePublic};
+use mitos::config::NoiseConfig;
+use mitos::keys::{MachinePrivate, MachinePublic};
 use snafu::Snafu;
 use snow::{Builder, HandshakeState, TransportState};
 use tracing::debug;
@@ -54,7 +54,7 @@ const MSG_TYPE_TRANSPORT: u8 = 0x04;
 const TAG_LEN: usize = 16;
 
 // Tuning knobs (payload size, scratch-buffer size) live on
-// [`hamma_core::config::NoiseConfig`]. See [`NoiseHandshake::with_config`]
+// [`mitos::config::NoiseConfig`]. See [`NoiseHandshake::with_config`]
 // and [`NoiseTransport::encrypt`] for consumption.
 
 /// Prologue mixed into the handshake hash, binding the session to the

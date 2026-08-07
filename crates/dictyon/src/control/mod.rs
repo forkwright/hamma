@@ -19,10 +19,10 @@
 
 use std::collections::HashSet;
 
-use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, PeerChange, PeerRemoval,
-    RegisterRequest, RegisterResponse,
+use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use mitos::types::{
+    AuthInfo, BackendLogId, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node,
+    PeerChange, PeerRemoval, RegisterRequest, RegisterResponse,
 };
 use snafu::Snafu;
 use tracing::{debug, warn};
@@ -544,7 +544,7 @@ impl ControlClient {
     fn hostinfo(&self) -> Hostinfo {
         let hostname = gethostname();
         Hostinfo {
-            backend_log_id: String::new(),
+            backend_log_id: BackendLogId::new(String::new()),
             os: std::env::consts::OS.to_string(),
             hostname,
             go_version: "dictyon/0.1.0".to_string(),
@@ -629,6 +629,9 @@ impl<'a> PeerRemovalIndex<'a> {
                 PeerRemoval::NodeKey(key) => {
                     node_keys.insert(key.as_str());
                 }
+                // WHY: PeerRemoval is #[non_exhaustive]; an unrecognized
+                // variant names a peer this client cannot index by ID or key.
+                _ => {} // skipped rather than treated as a match failure
             }
         }
         Self {

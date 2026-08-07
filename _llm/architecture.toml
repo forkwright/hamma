@@ -10,7 +10,7 @@ source_docs = [
 ]
 
 [architecture]
-summary = "Clean-room Rust implementation of a Tailscale-compatible mesh networking stack, starting with the dictyon client and shared hamma-core types."
+summary = "Clean-room Rust implementation of a Tailscale-compatible mesh networking stack, starting with the dictyon client and shared mitos types."
 layers = [
   "core-types",
   "client",
@@ -22,8 +22,8 @@ layers = [
 ]
 
 [[architecture.crates]]
-name = "hamma-core"
-path = "crates/hamma-core"
+name = "mitos"
+path = "crates/mitos"
 role = "Shared Noise framing, WireGuard key types, peer identity, ACL types, and protocol constants."
 
 [[architecture.crates]]

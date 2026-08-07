@@ -15,7 +15,7 @@ Phase A: `dictyon` peer client against tailscale.com control plane.
 | Name | Role | Status |
 |---|---|---|
 | `dictyon` | Peer client: Noise IK handshake, TCP/TLS control channel, registration, map streaming, zstd frame support | Phase A active |
-| `hamma-core` | Shared types: Noise framing, WireGuard key types, peer identity, ACL, protocol constants | Phase A active |
+| `mitos` | Shared types: Noise framing, WireGuard key types, peer identity, ACL, protocol constants | Phase A active |
 | `histos` | Coordination server (planned) | Not started |
 | `hamma-derp` | DERP relay server (planned) | Not started |
 
