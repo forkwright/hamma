@@ -1,5 +1,5 @@
 <!--
-scope: hamma repo conventions (Tailscale-compatible mesh networking in pure Rust: dictyon, hamma-core, future histos)
+scope: hamma repo conventions (Tailscale-compatible mesh networking in pure Rust: dictyon, mitos, future histos)
 defers_to: ~/menos-ops/CLAUDE.md for machine topology; ~/.claude/CLAUDE.md for operator principles; kanon standards for universal engineering policy
 tightens: no-unsafe/no-unwrap discipline, boringtun as the only audited unsafe boundary
 -->
@@ -33,7 +33,7 @@ Lint before committing: `kanon lint . --summary`. Gate: `kanon gate`.
 hamma/
 ├── crates/
 │   ├── dictyon/        # peer client (headline crate, ships first)
-│   └── hamma-core/    # shared types (Noise framing, keys, ACL, protocol consts)
+│   └── mitos/    # shared types (Noise framing, keys, ACL, protocol consts)
 ├── .github/workflows/  # CI gates (installed by kanon init)
 ├── Cargo.toml          # workspace root
 ├── deny.toml           # dependency policy
@@ -65,7 +65,7 @@ kanon lint . --summary           # full kanon lint
 - **Async runtime**: `tokio` with the actor-per-component pattern. No shared mutable state across async boundaries. `tokio::sync::Mutex` for async-locked data; `parking_lot::Mutex` for sync-only (never `std::sync::Mutex`  -  it deadlocks held across `.await`).
 - **Time**: `std::time::Instant` for monotonic time and `jiff` for wall-clock values when displayed to humans. Wall clock is never a dependency of correctness.
 - **Networking primitives**: `tokio::net` for TCP/UDP, `boringtun` (Cloudflare) for WireGuard data plane. No raw sockets, no nix crate, no libc. No reimplementation of WireGuard crypto  -  use the audited reference.
-- **Identity types**: ed25519 for node identity, Curve25519 for WireGuard tunnel keys, X25519 for Noise handshakes. Wrap each in a newtype to prevent accidental mixing. Types live in `hamma-core`.
+- **Identity types**: ed25519 for node identity, Curve25519 for WireGuard tunnel keys, X25519 for Noise handshakes. Wrap each in a newtype to prevent accidental mixing. Types live in `mitos`.
 - **Configuration**: TOML files parsed via `figment` with env-var override cascade. See TOML.md in kanon standards.
 - **Logging**: `tracing` with structured fields. Never `println!` in library code. `tracing-subscriber` for the binary.
 - **No `unwrap()`, no `expect()` in library code**. Deny at workspace level. Tests may use `.expect("msg")` for clear assertion.

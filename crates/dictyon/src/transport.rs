@@ -223,7 +223,7 @@ impl ControlConnection {
     reason = "tests use expect() for invariants that must hold"
 )]
 mod tests {
-    use hamma_core::keys::MachinePrivate;
+    use mitos::keys::MachinePrivate;
 
     use super::*;
 

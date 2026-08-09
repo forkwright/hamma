@@ -8,8 +8,8 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
-use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange, PeerRemoval};
+use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use mitos::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange, PeerRemoval};
 
 use super::*;
 

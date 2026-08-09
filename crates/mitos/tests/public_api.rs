@@ -1,4 +1,4 @@
-//! Integration smoke tests for the `hamma-core` public API.
+//! Integration smoke tests for the `mitos` public API.
 //!
 //! Unit tests live alongside the implementation in `src/keys.rs` and
 //! `src/types.rs`. These integration tests exercise the crate from an
@@ -11,12 +11,12 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
-use hamma_core::keys::{
+use mitos::keys::{
     DiscoPrivate, DiscoPublic, KeyError, MachinePrivate, MachinePublic, NodePrivate, NodePublic,
 };
-use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse, Node, PeerChange,
-    PeerRemoval, RegisterRequest, RegisterResponse,
+use mitos::types::{
+    AuthInfo, BackendLogId, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse,
+    Node, PeerChange, PeerRemoval, RegisterRequest, RegisterResponse,
 };
 
 #[test]
@@ -66,7 +66,7 @@ fn map_request_round_trips_through_json() {
         stream: true,
         omit_peers: false,
         hostinfo: Hostinfo {
-            backend_log_id: String::new(),
+            backend_log_id: BackendLogId::new(""),
             os: "linux".to_string(),
             hostname: "host".to_string(),
             go_version: "dictyon/0.1.0".to_string(),
@@ -87,7 +87,7 @@ fn register_request_omits_none_fields() {
             auth_key: Some("tskey-auth-test".to_string()),
         }),
         hostinfo: Hostinfo {
-            backend_log_id: "log".to_string(),
+            backend_log_id: BackendLogId::new("log"),
             os: "linux".to_string(),
             hostname: "h".to_string(),
             go_version: "dictyon/0.1.0".to_string(),

@@ -5,9 +5,11 @@ Hamma is a clean-room Rust implementation of a Tailscale-compatible mesh network
 ## Push target
 
 ```
-origin = http://kanon.lan/forkwright/hamma.git   (authoritative)
-github = git@github.com:forkwright/hamma.git     (mirror)
+origin = http://<kanon-forge-host>/forkwright/hamma.git   (authoritative)
+github = git@github.com:forkwright/hamma.git               (mirror)
 ```
+
+`<kanon-forge-host>` is the self-hosted kanon forge's internal address; ask a maintainer if you need push access to `origin`.
 
 Push to `origin`. The forge post-receive hook runs the CI pipeline defined in `.kanon-ci.toml` and mirrors merge commits to GitHub via the pr-sync worker.
 
@@ -15,7 +17,7 @@ Push to `origin`. The forge post-receive hook runs the CI pipeline defined in `.
 
 Two paths, same effect:
 
-**Stoa UI.** Open `http://kanon.lan/prs/forkwright/hamma`, click "New PR", pick base + head refs, review diff, submit.
+**Stoa UI.** Open `http://<kanon-forge-host>/prs/forkwright/hamma`, click "New PR", pick base + head refs, review diff, submit.
 
 **CLI.**
 
@@ -50,7 +52,7 @@ The GitHub mirror at `github.com/forkwright/hamma` works as before. A PR opened 
 
 ## Fallback
 
-If the forge is unreachable, push to `github` and open a GitHub PR. When the forge is back, its pr-sync worker picks up the PR and continues from there. This is an escape hatch, not a preferred path - use it only when kanon.lan is actually down.
+If the forge is unreachable, push to `github` and open a GitHub PR. When the forge is back, its pr-sync worker picks up the PR and continues from there. This is an escape hatch, not a preferred path - use it only when the forge is actually down.
 
 ## CI configuration
 

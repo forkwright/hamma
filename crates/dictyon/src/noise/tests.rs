@@ -8,7 +8,7 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
-use hamma_core::config::{DEFAULT_MAX_FRAME_PAYLOAD, MAX_FRAME_PAYLOAD_CEILING};
+use mitos::config::{DEFAULT_MAX_FRAME_PAYLOAD, MAX_FRAME_PAYLOAD_CEILING};
 
 use super::*;
 
@@ -443,7 +443,7 @@ proptest::proptest! {
 /// `max_frame_payload` rejects a payload that the default would accept.
 #[test]
 fn noise_config_tightens_frame_payload_limit() {
-    use hamma_core::config::NoiseConfig;
+    use mitos::config::NoiseConfig;
 
     // Size chosen to be well below the default (4 KiB) but above the
     // custom limit, so the same payload passes default and fails custom.
@@ -577,7 +577,7 @@ fn paired_transports() -> (NoiseTransport, NoiseTransport) {
 
 #[test]
 fn config_frame_ceiling_matches_this_module_s_tag_length() {
-    // WHY(#55): `hamma_core::config` must reject a `max_frame_payload` the
+    // WHY(#55): `mitos::config` must reject a `max_frame_payload` the
     // framing layer here cannot describe, but it cannot depend on `dictyon` to
     // learn the tag length. It therefore carries its own copy of the overhead.
     // This pins the two owners together: if `TAG_LEN` ever changes, the config

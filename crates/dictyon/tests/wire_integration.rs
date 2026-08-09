@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use base64::Engine;
-use hamma_core::keys::MachinePrivate;
+use mitos::keys::MachinePrivate;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use snow::Builder;
@@ -441,8 +441,8 @@ async fn register_returns_authorized_with_preauth_key() {
     });
 
     let machine_key = MachinePrivate::generate();
-    let node_key = hamma_core::keys::NodePrivate::generate();
-    let disco_key = hamma_core::keys::DiscoPrivate::generate();
+    let node_key = mitos::keys::NodePrivate::generate();
+    let disco_key = mitos::keys::DiscoPrivate::generate();
 
     let config = dictyon::wire::ControlConfig::new(
         format!("https://127.0.0.1:{}", addr.port()),
@@ -501,8 +501,8 @@ async fn map_stream_receives_compressed_full_map_after_register() {
     });
 
     let machine_key = MachinePrivate::generate();
-    let node_key = hamma_core::keys::NodePrivate::generate();
-    let disco_key = hamma_core::keys::DiscoPrivate::generate();
+    let node_key = mitos::keys::NodePrivate::generate();
+    let disco_key = mitos::keys::DiscoPrivate::generate();
 
     let config = dictyon::wire::ControlConfig::new(
         format!("https://127.0.0.1:{}", addr.port()),

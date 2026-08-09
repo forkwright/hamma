@@ -13,8 +13,8 @@ use dictyon::control::{ControlClient, ControlError, RegisterOutcome};
 use dictyon::noise::{NoiseError, NoiseHandshake};
 use dictyon::transport::{ControlConnection, TransportError};
 use dictyon::wire::{AsyncControlStream, ControlConfig, WireError, connect};
-use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use koinon::telemetry;
+use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
 

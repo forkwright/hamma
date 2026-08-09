@@ -1,5 +1,5 @@
 [package]
-name = "hamma-core"
+name = "mitos"
 description = "Shared types for the hamma mesh networking stack"
 version.workspace = true
 edition.workspace = true
