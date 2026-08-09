@@ -43,5 +43,5 @@ role = "Planned optional DERP relay server."
 
 [[interfaces]]
 name = "dictyon client"
-kind = "cli"
+kind = "lib"
 path = "crates/dictyon"

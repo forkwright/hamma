@@ -70,6 +70,7 @@ zstd = "0.13"
 
 # Testing
 proptest = "1"
+toml = "0.8"
 
 # Local workspace crates
 mitos = { path = "crates/mitos", version = "0.2.0" }

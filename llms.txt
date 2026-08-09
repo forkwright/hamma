@@ -4,9 +4,9 @@
 
 Hamma starts with `dictyon`, a peer client that validates against tailscale.com before the fleet builds `histos`, the sovereign coordination server. Phase A is pre-alpha and currently points at the WireGuard data-plane milestone.
 
-## Binary
+## Library
 
-`dictyon` - planned/active peer-client surface under `crates/dictyon`.
+`dictyon` - peer-client protocol library under `crates/dictyon` (no CLI binary ships yet).
 
 ## Architecture
 
