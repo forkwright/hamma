@@ -306,3 +306,78 @@ fn saturating_overflow_config_is_now_rejected() {
         "a usize::MAX header cap must not survive validation"
     );
 }
+
+#[test]
+fn connect_timeout_ms_bounds_are_enforced_at_both_ends() {
+    // WHY(#55): `check_connect_timeout_ms` is wired into `WireConfig::validate`
+    // but nothing asserted on it - the range could regress silently.
+    let (min, max) = CONNECT_TIMEOUT_MS_BOUNDS;
+    let min_usize = usize::try_from(min).expect("bound fits usize");
+    let max_usize = usize::try_from(max).expect("bound fits usize");
+
+    let below = WireConfig {
+        connect_timeout_ms: min - 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        below.validate(),
+        Err(ConfigError::OutOfRange {
+            field: "wire.connect_timeout_ms",
+            min: min_usize,
+            max: max_usize,
+            value: min_usize - 1,
+        })
+    );
+
+    let above = WireConfig {
+        connect_timeout_ms: max + 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        above.validate(),
+        Err(ConfigError::OutOfRange {
+            field: "wire.connect_timeout_ms",
+            min: min_usize,
+            max: max_usize,
+            value: max_usize + 1,
+        })
+    );
+}
+
+#[test]
+fn connect_timeout_ms_at_the_bounds_is_accepted() {
+    let (min, max) = CONNECT_TIMEOUT_MS_BOUNDS;
+
+    let at_min = WireConfig {
+        connect_timeout_ms: min,
+        ..Default::default()
+    };
+    assert!(
+        at_min.validate().is_ok(),
+        "the floor itself must be a legal value"
+    );
+
+    let at_max = WireConfig {
+        connect_timeout_ms: max,
+        ..Default::default()
+    };
+    assert!(
+        at_max.validate().is_ok(),
+        "the ceiling itself must be a legal value"
+    );
+}
+
+#[test]
+fn connect_timeout_ms_zero_is_admissible_as_the_disabled_sentinel() {
+    // `0` is not "below the floor" - it selects the disabled-deadline path
+    // in `WireConfig::connect_timeout` and is deliberately excluded from
+    // `CONNECT_TIMEOUT_MS_BOUNDS`, so validation must accept it.
+    let disabled = WireConfig {
+        connect_timeout_ms: 0,
+        ..Default::default()
+    };
+    assert!(
+        disabled.validate().is_ok(),
+        "0 selects the disabled-deadline sentinel, not a value in the range"
+    );
+}
