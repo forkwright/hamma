@@ -28,8 +28,8 @@ RUST/pub-visibility:crates/mitos/src/config/**
 # the future histos coordination server. These items are library API by design — the
 # pub modules in lib.rs re-export them. Narrowing to pub(crate) would break both the
 # example and the integration test, which live in separate compilation units.
-RUST/pub-visibility:crates/dictyon/src/control.rs
-RUST/pub-visibility:crates/dictyon/src/noise.rs
+RUST/pub-visibility:crates/dictyon/src/control/**
+RUST/pub-visibility:crates/dictyon/src/noise/**
 RUST/pub-visibility:crates/dictyon/src/transport.rs
 RUST/pub-visibility:crates/dictyon/src/wire/**
 
