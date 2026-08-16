@@ -471,6 +471,11 @@ async fn register_returns_authorized_with_preauth_key() {
     server.await.expect("mock server should not panic");
 }
 
+// WHY: split into a sibling file (see its own doc comment) because this
+// test plus the rest of the file exceeded the `RUST/file-too-long`
+// threshold. `use super::*;` there reaches every helper defined below.
+mod register_flow;
+
 #[tokio::test]
 #[expect(
     clippy::expect_used,

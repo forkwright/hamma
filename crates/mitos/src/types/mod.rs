@@ -129,21 +129,36 @@ pub struct Hostinfo {
 }
 
 /// Response from `POST /machine/register`.
+///
+/// A raw wire DTO: it mirrors the control server's JSON fields as closely
+/// as `serde(rename)` allows and carries no validation of its own. Field
+/// *combinations* the protocol does not allow (e.g. `machine_authorized:
+/// true` alongside a non-empty `auth_url`) are representable here on
+/// purpose -- rejecting them is the consuming client's job (`dictyon`'s
+/// `control::classify_register_response`), once every field the server can
+/// set is actually deserialized. This type must not grow validation logic;
+/// see `RUST.md` on wire-DTO exemptions.
 #[derive(Debug, Deserialize)]
 pub struct RegisterResponse {
-    /// URL the user must visit to authorize this machine. `None` if the
-    /// machine is already authorized (e.g. via pre-auth key).
-    #[serde(rename = "AuthURL")]
+    /// URL the user must visit to authorize this machine. `None` or an
+    /// empty string both mean "no URL" -- the reference server marshals a
+    /// zero-value string as `""` rather than omitting the field.
+    #[serde(rename = "AuthURL", default)]
     pub auth_url: Option<String>,
 
     /// Whether the machine is now authorized.
-    #[serde(rename = "MachineAuthorized")]
+    #[serde(rename = "MachineAuthorized", default)]
     pub machine_authorized: bool,
 
-    /// ISO 8601 expiry timestamp for the node key. `None` if the key does
-    /// not expire.
-    #[serde(rename = "NodeKeyExpiry")]
-    pub node_key_expiry: Option<String>,
+    /// Whether the node key has expired and must be rotated before the
+    /// server will consider this node authorized.
+    #[serde(rename = "NodeKeyExpired", default)]
+    pub node_key_expired: bool,
+
+    /// Server-supplied reason the request was rejected. `None` or an empty
+    /// string both mean "no error", for the same reason as `auth_url`.
+    #[serde(rename = "Error", default)]
+    pub error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

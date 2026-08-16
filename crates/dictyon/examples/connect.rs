@@ -134,25 +134,38 @@ async fn register_node(
     auth_key: Option<&str>,
 ) -> Result<(), ExampleError> {
     info!("registering…");
-    match client.register(stream, auth_key).await? {
+    report_register_outcome(client.register(stream, auth_key).await?);
+    Ok(())
+}
+
+/// Log what a [`RegisterOutcome`] means for this example run.
+///
+/// A real caller (not this example) would poll again after `NeedsAuth`
+/// once the user has visited the URL, and would retry registration with a
+/// fresh node key after `RotateNodeKey`; this example only demonstrates
+/// that every outcome is a distinguishable, handled case.
+fn report_register_outcome(outcome: RegisterOutcome) {
+    match outcome {
         RegisterOutcome::Authorized(resp) => {
-            info!(
-                authorized = resp.machine_authorized,
-                expiry = ?resp.node_key_expiry,
-                "node authorized"
-            );
+            info!(authorized = resp.machine_authorized, "node authorized");
         }
-        RegisterOutcome::NeedsAuth { auth_url } => {
-            info!("visit to authorize: {auth_url}");
-            let resp = client.poll_registration(stream, &auth_url).await?;
-            info!(authorized = resp.machine_authorized, "auth complete");
+        RegisterOutcome::NeedsAuth(url) => {
+            info!("visit to authorize: {url}");
+        }
+        RegisterOutcome::RotateNodeKey => {
+            warn!("server reports the node key has expired; a fresh key is required");
+        }
+        RegisterOutcome::Rejected { reason } => {
+            warn!(reason, "server rejected the registration request");
+        }
+        RegisterOutcome::Contradictory(fault) => {
+            warn!(?fault, "server sent a response the protocol does not allow");
         }
         // RegisterOutcome is #[non_exhaustive]; cover future variants.
         _ => {
             warn!("unknown register outcome variant; treating as unsupported");
         }
     }
-    Ok(())
 }
 
 async fn stream_map(

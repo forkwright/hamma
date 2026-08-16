@@ -30,6 +30,11 @@ use tracing::{debug, warn};
 use crate::transport::ControlConnection;
 use crate::wire::AsyncControlStream;
 
+mod register;
+
+use register::classify_register_response;
+pub use register::{NonEmptyUrl, RegisterFault, RegisterOutcome};
+
 /// Upper bound on the peers a netmap retains from a coordination server.
 ///
 /// WHY: every peer-bearing field of a [`MapResponse`] is server-controlled and
@@ -97,22 +102,6 @@ impl From<crate::wire::WireError> for ControlError {
     fn from(source: crate::wire::WireError) -> Self {
         Self::Wire { source }
     }
-}
-
-/// Outcome of an async registration attempt.
-///
-/// When the machine already has a valid pre-auth key, the server
-/// authorizes it immediately ([`RegisterOutcome::Authorized`]). Otherwise,
-/// the user must visit an auth URL ([`RegisterOutcome::NeedsAuth`]).
-#[non_exhaustive]
-pub enum RegisterOutcome {
-    /// The node was authorized; contains the server's registration response.
-    Authorized(RegisterResponse),
-    /// Interactive auth is required; the user must visit this URL.
-    NeedsAuth {
-        /// URL the user must visit to authorize this node.
-        auth_url: String,
-    },
 }
 
 /// The local view of the network map, maintained by applying
@@ -307,13 +296,18 @@ impl ControlClient {
 
     /// Register this node asynchronously using an [`AsyncControlStream`].
     ///
-    /// Serializes a [`RegisterRequest`], sends it over the stream, and parses
-    /// the response. Returns either an authorized [`RegisterResponse`] or the
-    /// auth URL the user must visit.
+    /// Serializes a [`RegisterRequest`], sends it over the stream, and
+    /// validates the response into a [`RegisterOutcome`] -- every field
+    /// combination the server can send, including ones the protocol does
+    /// not allow, lands in a variant of that type.
     ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on serialization, I/O, or parse failure.
+    /// Returns [`ControlError`] on serialization, I/O, or a JSON payload
+    /// that fails to parse. A syntactically valid response the protocol
+    /// still rejects -- an explicit rejection, contradictory fields, an
+    /// expired key -- is not an error here; it is a [`RegisterOutcome`]
+    /// variant, because the request itself succeeded.
     pub async fn register(
         &mut self,
         stream: &mut AsyncControlStream,
@@ -330,28 +324,18 @@ impl ControlClient {
 
         let raw = stream.recv_message().await?;
         let resp = parse_register_response(&raw)?;
-
-        if let Some(url) = resp.auth_url.clone() {
-            debug!(
-                target: "dictyon::control",
-                outcome = "needs_auth",
-                "register requires interactive auth",
-            );
-            Ok(RegisterOutcome::NeedsAuth { auth_url: url })
-        } else {
-            debug!(
-                target: "dictyon::control",
-                outcome = "authorized",
-                "register authorized",
-            );
-            Ok(RegisterOutcome::Authorized(resp))
-        }
+        let outcome = classify_register_response(resp);
+        log_register_outcome(&outcome);
+        Ok(outcome)
     }
 
     /// Poll for registration completion after the user has visited the auth URL.
     ///
     /// Sends a new [`RegisterRequest`] with the `followup` field set to the
-    /// URL returned in the initial response, and waits for authorization.
+    /// URL returned in the initial response, and validates the response
+    /// into a [`RegisterOutcome`] via the same rules [`Self::register`]
+    /// uses -- a followup poll can be rejected or come back contradictory
+    /// exactly as the initial request can.
     ///
     /// # Errors
     ///
@@ -360,7 +344,7 @@ impl ControlClient {
         &mut self,
         stream: &mut AsyncControlStream,
         followup_url: &str,
-    ) -> Result<RegisterResponse, ControlError> {
+    ) -> Result<RegisterOutcome, ControlError> {
         debug!(
             target: "dictyon::control",
             followup_url,
@@ -378,7 +362,10 @@ impl ControlClient {
         stream.send_message(&framed).await?;
 
         let raw = stream.recv_message().await?;
-        parse_register_response(&raw)
+        let resp = parse_register_response(&raw)?;
+        let outcome = classify_register_response(resp);
+        log_register_outcome(&outcome);
+        Ok(outcome)
     }
 
     /// Send the initial map request and start streaming map updates.
@@ -704,6 +691,44 @@ fn parse_register_response(raw: &[u8]) -> Result<RegisterResponse, ControlError>
     serde_json::from_slice(raw).map_err(|e| ControlError::Json {
         message: e.to_string(),
     })
+}
+
+/// Log a validated [`RegisterOutcome`] at a level matching how much it
+/// deserves operator attention.
+///
+/// WHY: [`RegisterOutcome::Rejected`], `RotateNodeKey`, and `Contradictory`
+/// are exactly the shapes this issue exists to stop silently tolerating, so
+/// they log at `warn` -- a caller polling in a loop should not need to
+/// inspect every outcome to notice the control server is sending something
+/// it shouldn't.
+fn log_register_outcome(outcome: &RegisterOutcome) {
+    match outcome {
+        RegisterOutcome::Authorized(_) => {
+            debug!(target: "dictyon::control", outcome = "authorized", "register authorized");
+        }
+        RegisterOutcome::NeedsAuth(url) => {
+            debug!(
+                target: "dictyon::control",
+                outcome = "needs_auth",
+                auth_url = %url,
+                "register requires interactive auth",
+            );
+        }
+        RegisterOutcome::RotateNodeKey => {
+            warn!(target: "dictyon::control", outcome = "rotate_node_key", "server reports the node key has expired");
+        }
+        RegisterOutcome::Rejected { reason } => {
+            warn!(target: "dictyon::control", outcome = "rejected", reason = %reason, "server rejected the registration request");
+        }
+        RegisterOutcome::Contradictory(fault) => {
+            warn!(
+                target: "dictyon::control",
+                outcome = "contradictory",
+                fault = ?fault,
+                "server sent a registration response the protocol does not allow",
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
