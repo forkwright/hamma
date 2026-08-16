@@ -158,7 +158,7 @@ mod tests {
     }
 
     /// WHY(#66): the empty-string `AuthURL` case is the exact shape a
-    /// PascalCase Go server sends alongside `MachineAuthorized: true` --
+    /// `PascalCase` Go server sends alongside `MachineAuthorized: true` --
     /// the field is present because the struct has no `omitempty` tag, not
     /// because interactive auth is actually needed. It must classify
     /// identically to the field being absent.
