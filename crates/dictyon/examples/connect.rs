@@ -134,16 +134,27 @@ async fn register_node(
     auth_key: Option<&str>,
 ) -> Result<(), ExampleError> {
     info!("registering…");
-    report_register_outcome(client.register(stream, auth_key).await?);
+    match client.register(stream, auth_key).await? {
+        RegisterOutcome::NeedsAuth(url) => {
+            info!("visit to authorize: {url}");
+            let followup = client.poll_registration(stream, url.as_str()).await?;
+            report_register_outcome(followup);
+        }
+        outcome => report_register_outcome(outcome),
+    }
     Ok(())
 }
 
-/// Log what a [`RegisterOutcome`] means for this example run.
+/// Log what a terminal [`RegisterOutcome`] means for this example run.
 ///
-/// A real caller (not this example) would poll again after `NeedsAuth`
-/// once the user has visited the URL, and would retry registration with a
-/// fresh node key after `RotateNodeKey`; this example only demonstrates
-/// that every outcome is a distinguishable, handled case.
+/// [`RegisterOutcome::NeedsAuth`] is handled by the caller (`register_node`)
+/// before it reaches here: a real caller polls again via
+/// [`ControlClient::poll_registration`] once the user has visited the URL,
+/// so this example performs that round trip rather than only logging the
+/// URL. A [`RegisterOutcome::NeedsAuth`] can still arrive here as the
+/// *followup* poll's own result (the server has not observed the user
+/// complete auth yet); a real caller would retry registration with a fresh
+/// node key after `RotateNodeKey`.
 fn report_register_outcome(outcome: RegisterOutcome) {
     match outcome {
         RegisterOutcome::Authorized(resp) => {

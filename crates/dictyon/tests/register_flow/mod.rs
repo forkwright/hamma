@@ -5,7 +5,7 @@
 
 use super::*;
 
-/// WHY(#66): `poll_registration` runs the same wire round-trip as
+/// WHY: `poll_registration` runs the same wire round-trip as
 /// `register` and must validate its response through the same exhaustive
 /// classifier -- an unvalidated followup response was the original defect's
 /// second, untested entry point. This drives `register` to `NeedsAuth` and

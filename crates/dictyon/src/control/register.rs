@@ -157,7 +157,7 @@ mod tests {
         );
     }
 
-    /// WHY(#66): the empty-string `AuthURL` case is the exact shape a
+    /// WHY: the empty-string `AuthURL` case is the exact shape a
     /// `PascalCase` Go server sends alongside `MachineAuthorized: true` --
     /// the field is present because the struct has no `omitempty` tag, not
     /// because interactive auth is actually needed. It must classify
@@ -196,7 +196,7 @@ mod tests {
         }
     }
 
-    /// WHY(#66): this used to discard the rejection and fall into the
+    /// WHY: this used to discard the rejection and fall into the
     /// empty-URL auth flow. `Error` must win over `MachineAuthorized` and
     /// `AuthURL` unconditionally.
     #[test]
@@ -287,7 +287,7 @@ mod tests {
         );
     }
 
-    /// WHY(#66): this used to become `Authorized` by inferring success from
+    /// WHY: this used to become `Authorized` by inferring success from
     /// an absent `AuthURL` alone, discarding `MachineAuthorized: false`.
     #[test]
     fn unauthorized_with_no_signal_is_contradictory_not_authorized() {
