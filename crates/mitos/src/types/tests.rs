@@ -8,6 +8,8 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
+use zeroize::Zeroize;
+
 use super::*;
 
 /// WHY(#54): the failure this guards is not a wrong value but a refusal to
@@ -42,9 +44,7 @@ fn register_request_serializes_to_json() {
     let req = RegisterRequest {
         node_key: "nodekey:abc123".to_string(),
         old_node_key: String::new(),
-        auth: Some(AuthInfo {
-            auth_key: Some("tskey-auth-test".to_string()),
-        }),
+        auth: Some(AuthInfo::new("tskey-auth-test")),
         hostinfo: Hostinfo {
             backend_log_id: BackendLogId::new("log123"),
             os: "linux".to_string(),
@@ -278,9 +278,7 @@ fn map_response_deserializes_peer_removals_by_node_id_and_key() {
 /// fails if the manual impl is dropped or a derive is reinstated.
 #[test]
 fn auth_info_debug_redacts_the_pre_auth_key() {
-    let info = AuthInfo {
-        auth_key: Some("tskey-auth-kSeCrEtValue".to_string()),
-    };
+    let info = AuthInfo::new("tskey-auth-kSeCrEtValue");
 
     let rendered = format!("{info:?}");
 
@@ -301,9 +299,7 @@ fn register_request_debug_does_not_leak_the_nested_pre_auth_key() {
     let request = RegisterRequest {
         node_key: "nodekey:abc".to_string(),
         old_node_key: String::new(),
-        auth: Some(AuthInfo {
-            auth_key: Some("tskey-auth-kSeCrEtValue".to_string()),
-        }),
+        auth: Some(AuthInfo::new("tskey-auth-kSeCrEtValue")),
         hostinfo: Hostinfo {
             backend_log_id: BackendLogId::new("log-id"),
             os: "linux".to_string(),
@@ -334,5 +330,55 @@ fn auth_info_debug_distinguishes_absent_from_redacted() {
     assert!(
         !absent.contains("REDACTED"),
         "an absent key must not claim to be redacted: {absent}"
+    );
+}
+
+/// WHY this is the one place `unsafe` is justified in this crate: a safe
+/// accessor cannot distinguish "scrubbed" from "never touched" here, because
+/// `String::zeroize` overwrites every byte of the backing buffer and *then*
+/// truncates the logical length to zero (`zeroize-1.8.2` `src/lib.rs`, the
+/// `Vec<Z>` impl) — so `as_bytes`/`as_str` read an empty string either way.
+/// Proving the write actually happened means reading the buffer at the
+/// address it was always at, which safe `String`/`Vec` APIs will not do once
+/// the length is zero.
+///
+/// This exercises the exact call `Zeroizing<String>`'s `Drop` makes
+/// (`Zeroize::zeroize`), without dropping the wrapper first: dropping would
+/// free the allocation, and reading through a dangling pointer afterward
+/// would be a second, unrelated unsoundness this test has no need to risk.
+#[test]
+#[expect(
+    unsafe_code,
+    reason = "reads the still-live backing buffer of a String after zeroize() \
+              truncates its length to 0, which is the only way to observe \
+              that the bytes were actually overwritten rather than merely \
+              hidden by the truncation; see the WHY above"
+)]
+fn scrubbing_the_pre_auth_key_zeroes_its_backing_bytes() {
+    let info = AuthInfo::new("tskey-auth-kSeCrEtValue");
+    let mut key: Zeroizing<String> = info.auth_key.expect("AuthInfo::new always sets Some(..)");
+    let ptr = key.as_ptr();
+    let len = key.len();
+    assert_eq!(
+        len,
+        "tskey-auth-kSeCrEtValue".len(),
+        "sanity: key not yet touched"
+    );
+
+    key.zeroize();
+
+    // SAFETY: `ptr` was obtained from `key.as_ptr()` above and `key` is
+    // still alive and un-dropped at this point (it is dropped for real at
+    // the end of this function), so the allocation is still live and has
+    // not moved or been reallocated -- `zeroize()` mutates in place. `len`
+    // is the byte count that was valid (and initialized) immediately before
+    // the call, and `Vec<u8>::zeroize` overwrites every one of those bytes
+    // via `iter_mut().zeroize()` before it truncates the logical length, so
+    // all `len` bytes at `ptr` are both in-bounds of the live allocation and
+    // were written through, not merely allocated.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    assert!(
+        bytes.iter().all(|&b| b == 0),
+        "pre-auth key bytes were not zeroed by Zeroize::zeroize",
     );
 }

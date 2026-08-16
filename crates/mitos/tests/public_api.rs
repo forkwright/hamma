@@ -83,9 +83,7 @@ fn register_request_omits_none_fields() {
     let req = RegisterRequest {
         node_key: "nodekey:abc".to_string(),
         old_node_key: String::new(),
-        auth: Some(AuthInfo {
-            auth_key: Some("tskey-auth-test".to_string()),
-        }),
+        auth: Some(AuthInfo::new("tskey-auth-test")),
         hostinfo: Hostinfo {
             backend_log_id: BackendLogId::new("log"),
             os: "linux".to_string(),

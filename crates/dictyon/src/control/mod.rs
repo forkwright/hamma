@@ -290,13 +290,16 @@ impl ControlClient {
     /// # Errors
     ///
     /// Returns [`ControlError::Json`] if serialization fails.
+    ///
+    /// Time: O(n) — dominated by `serde_json::to_vec` over the request,
+    /// where `n` is the serialized payload size.
+    /// Space: O(n) — the returned buffer plus the intermediate
+    /// [`RegisterRequest`].
     pub fn build_register_request(&self, auth_key: Option<&str>) -> Result<Vec<u8>, ControlError> {
         let req = RegisterRequest {
             node_key: self.node_key.public_key().to_hex(),
             old_node_key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
-            auth: auth_key.map(|k| AuthInfo {
-                auth_key: Some(k.to_string()),
-            }),
+            auth: auth_key.map(AuthInfo::new),
             hostinfo: self.hostinfo(),
             followup: None,
         };
