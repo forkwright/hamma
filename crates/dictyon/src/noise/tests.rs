@@ -42,9 +42,17 @@ fn handshake_initiation_produces_message() {
     // Framed message: 2B version + 1B type + 2B length + noise payload
     assert!(msg.len() > 5, "message should contain header + payload");
 
-    // Check version (LE u16)
-    assert_eq!(msg[0], 0x01); // version 1 low byte
-    assert_eq!(msg[1], 0x00); // version 1 high byte
+    // Version bytes must be CAPABILITY_VERSION (71), big-endian on the
+    // wire (see the WARNING on NoiseHandshake::initiation_message).
+    // Pinned as a literal, not re-derived via to_be_bytes(), so this test
+    // still fails if the encoding regresses to little-endian -- a
+    // round-trip through this crate's own encoder/decoder would not catch
+    // that, since both sides would be wrong the same way.
+    assert_eq!(
+        [msg[0], msg[1]],
+        [0x00, 0x47],
+        "version bytes must be big-endian 71: high byte first"
+    );
 
     // Check message type
     assert_eq!(msg[2], MSG_TYPE_INITIATION);
@@ -261,9 +269,17 @@ fn initiation_frame_has_correct_structure() {
         .initiation_message()
         .expect("initiation should succeed");
 
-    // Bytes 0-1: version LE u16 = 1
-    let version = u16::from_le_bytes([frame[0], frame[1]]);
-    assert_eq!(version, 1, "version should be 1");
+    // Bytes 0-1: version BE u16 = CAPABILITY_VERSION (71)
+    let version = u16::from_be_bytes([frame[0], frame[1]]);
+    assert_eq!(
+        version, 71,
+        "version should be big-endian CAPABILITY_VERSION (71)"
+    );
+    assert_eq!(
+        [frame[0], frame[1]],
+        CAPABILITY_VERSION.to_be_bytes(),
+        "frame's version bytes must equal the shared CAPABILITY_VERSION's BE encoding"
+    );
 
     // Byte 2: type = 0x01
     assert_eq!(frame[2], MSG_TYPE_INITIATION, "type byte should be 0x01");
@@ -420,7 +436,7 @@ proptest::proptest! {
         assert_eq!(decrypted, payload, "decrypted payload must equal original");
     }
 
-    /// Payloads larger than MAX_FRAME_PAYLOAD must be rejected at encrypt time.
+    /// Payloads larger than `MAX_FRAME_PAYLOAD` must be rejected at encrypt time.
     #[test]
     fn transport_oversized_payload_rejected(
         extra in 1usize..=256usize

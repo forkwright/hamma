@@ -11,6 +11,7 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
+use mitos::CAPABILITY_VERSION;
 use mitos::keys::{
     DiscoPrivate, DiscoPublic, KeyError, MachinePrivate, MachinePublic, NodePrivate, NodePublic,
 };
@@ -58,7 +59,7 @@ fn machine_public_from_hex_rejects_wrong_length() {
 #[test]
 fn map_request_round_trips_through_json() {
     let req = MapRequest {
-        version: 68,
+        version: CAPABILITY_VERSION.as_u64(),
         compress: Some("zstd".to_string()),
         node_key: "nodekey:abc".to_string(),
         disco_key: "discokey:def".to_string(),
@@ -74,13 +75,14 @@ fn map_request_round_trips_through_json() {
     };
     let json = serde_json::to_string(&req).expect("MapRequest serializes");
     assert!(json.contains("\"NodeKey\":\"nodekey:abc\""));
-    assert!(json.contains("\"Version\":68"));
+    assert!(json.contains(&format!("\"Version\":{CAPABILITY_VERSION}")));
     assert!(json.contains("\"Compress\":\"zstd\""));
 }
 
 #[test]
 fn register_request_omits_none_fields() {
     let req = RegisterRequest {
+        version: CAPABILITY_VERSION.as_u64(),
         node_key: "nodekey:abc".to_string(),
         old_node_key: String::new(),
         auth: Some(AuthInfo::new("tskey-auth-test")),
@@ -107,6 +109,10 @@ fn register_request_omits_none_fields() {
     assert!(
         json.contains("\"AuthKey\":\"tskey-auth-test\""),
         "AuthKey value should be present under Auth: {json}"
+    );
+    assert!(
+        json.contains(&format!("\"Version\":{CAPABILITY_VERSION}")),
+        "RegisterRequest.Version should be present: {json}"
     );
 }
 

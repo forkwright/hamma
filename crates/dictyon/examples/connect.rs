@@ -14,6 +14,7 @@ use dictyon::noise::{NoiseError, NoiseHandshake};
 use dictyon::transport::{ControlConnection, TransportError};
 use dictyon::wire::{AsyncControlStream, ControlConfig, WireError, connect};
 use koinon::telemetry;
+use mitos::capability::CAPABILITY_VERSION;
 use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
@@ -235,13 +236,16 @@ fn build_placeholder_connection() -> Result<ControlConnection, ExampleError> {
             .map_err(|e: snow::Error| ExampleError::PlaceholderHandshake {
                 message: format!("parse noise params: {e}"),
             })?;
-    let prologue = b"Tailscale Control Protocol v1";
+    // WHY derived, not a literal: this responder must mix the identical
+    // prologue the real NoiseHandshake used to build init_msg, or the Noise
+    // handshake hash diverges and read_message below fails authentication.
+    let prologue = format!("Tailscale Control Protocol v{CAPABILITY_VERSION}").into_bytes();
     let mut responder = snow::Builder::new(params)
         .local_private_key(server_key.as_bytes())
         .context(PlaceholderHandshakeFromSnowSnafu {
             stage: "local_private_key",
         })?
-        .prologue(prologue)
+        .prologue(&prologue)
         .context(PlaceholderHandshakeFromSnowSnafu { stage: "prologue" })?
         .build_responder()
         .context(PlaceholderHandshakeFromSnowSnafu {

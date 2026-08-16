@@ -7,7 +7,8 @@
 //!
 //! # Protocol flow
 //!
-//! 1. GET `{control_url}/key?v=71` → parse `{"PublicKey":"mkey:hex..."}` → [`MachinePublic`].
+//! 1. GET `{control_url}/key?v={N}` (`N` = [`mitos::capability::CAPABILITY_VERSION`])
+//!    → parse `{"PublicKey":"mkey:hex..."}` → [`MachinePublic`].
 //! 2. TCP connect → TLS handshake.
 //! 3. POST `/ts2021` with `Upgrade: tailscale-control-protocol` and
 //!    `X-Tailscale-Handshake: base64(noise_initiation)`.
@@ -19,6 +20,7 @@
 
 use std::sync::Arc;
 
+use mitos::capability::CAPABILITY_VERSION;
 use mitos::config::{Config, WireConfig};
 use mitos::keys::{KeyError, MachinePrivate, MachinePublic};
 use rustls::ClientConfig;
@@ -42,9 +44,17 @@ use crate::transport::ControlConnection;
 /// Noise upgrade path (Tailscale ts2021 wire contract).
 const UPGRADE_PATH: &str = "/ts2021";
 
-/// Key endpoint path. `v=71` is the wire version dictyon speaks; bumping
-/// it is a protocol break, not a tuning operation.
-const KEY_PATH: &str = "/key?v=71";
+/// Key endpoint path, e.g. `/key?v=71`.
+///
+/// Wire-format invariant: the query parameter is
+/// [`mitos::capability::CAPABILITY_VERSION`], the wire version dictyon
+/// speaks. It is a function rather than a `const` because the value is
+/// built from a non-`'static` [`std::fmt::Display`] impl; bumping the
+/// underlying capability version is a protocol break, not a tuning
+/// operation.
+fn key_path() -> String {
+    format!("/key?v={CAPABILITY_VERSION}")
+}
 
 /// HTTP Upgrade header value for the Tailscale control protocol.
 const UPGRADE_HEADER: &str = "tailscale-control-protocol";
@@ -316,7 +326,8 @@ impl AsyncControlStream {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Fetch the control server's public machine key from `GET /key?v=71`.
+/// Fetch the control server's public machine key from [`key_path`]
+/// (`GET /key?v={N}`, `N` = [`mitos::capability::CAPABILITY_VERSION`]).
 ///
 /// Uses [`WireConfig::default`] for buffer/limit knobs. For a caller-tuned
 /// variant see [`fetch_server_key_with_config`].
@@ -378,7 +389,10 @@ async fn fetch_server_key_with_config_inner(
         .await
         .context(TlsSnafu)?;
 
-    let request = format!("GET {KEY_PATH} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n",
+        key_path()
+    );
     tls_stream
         .write_all(request.as_bytes())
         .await
@@ -507,7 +521,10 @@ async fn fetch_server_key_with_tls_and_config_inner(
         .await
         .context(TlsSnafu)?;
 
-    let request = format!("GET {KEY_PATH} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n",
+        key_path()
+    );
     tls_stream
         .write_all(request.as_bytes())
         .await

@@ -257,6 +257,15 @@ async fn connect_times_out_against_a_blackholing_peer() {
 }
 
 #[test]
+fn key_path_derives_from_the_shared_capability_version() {
+    assert_eq!(
+        key_path(),
+        format!("/key?v={CAPABILITY_VERSION}"),
+        "the /key endpoint version must derive from CAPABILITY_VERSION, not a local literal"
+    );
+}
+
+#[test]
 fn parse_host_port_https_default() {
     let (host, port) = parse_host_port("https://controlplane.tailscale.com").expect("should parse");
     assert_eq!(host, "controlplane.tailscale.com");

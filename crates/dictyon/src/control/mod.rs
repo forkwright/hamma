@@ -19,6 +19,7 @@
 
 use std::collections::HashSet;
 
+use mitos::capability::CAPABILITY_VERSION;
 use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use mitos::types::{
     AuthInfo, BackendLogId, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node,
@@ -286,6 +287,7 @@ impl ControlClient {
     /// [`RegisterRequest`].
     pub fn build_register_request(&self, auth_key: Option<&str>) -> Result<Vec<u8>, ControlError> {
         let req = RegisterRequest {
+            version: CAPABILITY_VERSION.as_u64(),
             node_key: self.node_key.public_key().to_hex(),
             old_node_key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
             auth: auth_key.map(AuthInfo::new),
@@ -354,6 +356,7 @@ impl ControlClient {
             "polling registration followup",
         );
         let req = RegisterRequest {
+            version: CAPABILITY_VERSION.as_u64(),
             node_key: self.node_key.public_key().to_hex(),
             old_node_key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
             auth: None,
@@ -428,7 +431,7 @@ impl ControlClient {
     /// Returns [`ControlError::Json`] if serialization fails.
     pub fn build_map_request(&self) -> Result<Vec<u8>, ControlError> {
         let req = MapRequest {
-            version: 68,
+            version: CAPABILITY_VERSION.as_u64(),
             compress: Some("zstd".to_string()),
             node_key: self.node_key.public_key().to_hex(),
             disco_key: self.disco_key.public_key().to_hex(),

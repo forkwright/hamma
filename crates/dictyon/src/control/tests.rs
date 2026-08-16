@@ -32,7 +32,8 @@ fn paired_client() -> ControlClient {
     let params: snow::params::NoiseParams = "Noise_IK_25519_ChaChaPoly_BLAKE2s"
         .parse()
         .expect("params should parse");
-    let prologue = b"Tailscale Control Protocol v1";
+    let prologue = format!("Tailscale Control Protocol v{CAPABILITY_VERSION}").into_bytes();
+    let prologue = prologue.as_slice();
 
     let mut initiator = snow::Builder::new(params)
         .local_private_key(machine_key.as_bytes())
@@ -387,6 +388,11 @@ fn register_builds_correct_json() {
     assert!(json.get("NodeKey").is_some(), "missing NodeKey");
     assert!(json.get("OldNodeKey").is_some(), "missing OldNodeKey");
     assert!(json.get("Hostinfo").is_some(), "missing Hostinfo");
+    assert_eq!(
+        json["Version"].as_u64(),
+        Some(CAPABILITY_VERSION.as_u64()),
+        "RegisterRequest.Version must derive from the shared CAPABILITY_VERSION"
+    );
 
     // NodeKey should be a proper nodekey: prefixed string.
     let node_key = json["NodeKey"].as_str().expect("NodeKey should be string");
@@ -419,10 +425,58 @@ fn map_request_advertises_zstd_compression() {
     let json: serde_json::Value =
         serde_json::from_slice(&payload).expect("payload should be valid JSON");
 
-    assert_eq!(json["Version"].as_u64(), Some(68));
+    assert_eq!(
+        json["Version"].as_u64(),
+        Some(CAPABILITY_VERSION.as_u64()),
+        "MapRequest.Version must derive from the shared CAPABILITY_VERSION"
+    );
     assert_eq!(json["Stream"].as_bool(), Some(true));
     assert_eq!(json["OmitPeers"].as_bool(), Some(false));
     assert_eq!(json["Compress"].as_str(), Some("zstd"));
+}
+
+/// WHY: the defect this issue fixes was three call sites each restating the
+/// capability version as an independent literal (1, 68, 71) that had
+/// silently drifted apart. A future regression that reintroduces a
+/// hardcoded literal at *one* call site while the others still derive from
+/// [`CAPABILITY_VERSION`] would pass every other test in this file --
+/// each one only checks its own request against the shared constant, not
+/// against its sibling. This test compares the two live JSON payloads to
+/// each other, so a one-sided hardcode fails it even if that hardcoded
+/// value happens to equal the current [`CAPABILITY_VERSION`] by coincidence
+/// today.
+#[test]
+fn register_and_map_requests_advertise_the_same_capability_version() {
+    let client = paired_client();
+
+    let register_payload = client
+        .build_register_request(None)
+        .expect("register request should build");
+    let register_json: serde_json::Value =
+        serde_json::from_slice(&register_payload).expect("register payload should be JSON");
+
+    let map_payload = client
+        .build_map_request()
+        .expect("map request should build");
+    let map_json: serde_json::Value =
+        serde_json::from_slice(&map_payload).expect("map payload should be JSON");
+
+    let register_version = register_json["Version"]
+        .as_u64()
+        .expect("RegisterRequest.Version should be a JSON number");
+    let map_version = map_json["Version"]
+        .as_u64()
+        .expect("MapRequest.Version should be a JSON number");
+
+    assert_eq!(
+        register_version, map_version,
+        "RegisterRequest and MapRequest must advertise identical capability versions"
+    );
+    assert_eq!(
+        register_version,
+        CAPABILITY_VERSION.as_u64(),
+        "the shared version must equal CAPABILITY_VERSION, not merely agree with itself"
+    );
 }
 
 #[test]
