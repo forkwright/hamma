@@ -57,9 +57,14 @@ pub(super) fn endpoints_are_valid(endpoints: &[String]) -> bool {
 /// length within the address family's bit width.
 ///
 /// `std` has no CIDR parser, so this is hand-rolled rather than pulling in a
-/// dependency for one check: split on the last `/`, parse the address half
+/// dependency for one check: split on the first `/`, parse the address half
 /// with [`IpAddr::from_str`], and bound the prefix half by the address
-/// family's bit width (32 for IPv4, 128 for IPv6).
+/// family's bit width (32 for IPv4, 128 for IPv6). Splitting on the first
+/// `/` rather than the last is safe here because neither a valid `IpAddr`
+/// nor a valid `u8` prefix can itself contain a `/`, so a second `/`
+/// anywhere in `s` always lands in the prefix half and fails
+/// `prefix.parse::<u8>()` -- it cannot relocate into the address half and
+/// produce a false accept.
 fn is_valid_cidr(s: &str) -> bool {
     let Some((addr, prefix)) = s.split_once('/') else {
         return false;
@@ -175,6 +180,79 @@ mod tests {
     #[test]
     fn valid_ipv6_cidr_passes() {
         assert!(is_valid_cidr("fd7a:115c:a1e0::1/128"));
+    }
+
+    // WHY(negative fixture, prefix-length boundary): the guard is
+    // `prefix <= max_prefix`. Off-by-one on that comparison (`<` instead of
+    // `<=`, or `max_prefix` computed as 31/127) is exactly the class of bug
+    // this file exists to catch. These four pin all four corners: each
+    // family's exact max (must pass) and exact max-plus-one (must fail) --
+    // a value far past the max, like `/99` below, cannot distinguish an
+    // off-by-one from correct behavior.
+    #[test]
+    fn ipv4_cidr_at_max_prefix_passes() {
+        assert!(
+            is_valid_cidr("100.64.0.1/32"),
+            "/32 is a valid IPv4 host route"
+        );
+    }
+
+    #[test]
+    fn ipv4_cidr_one_past_max_prefix_fails() {
+        assert!(
+            !is_valid_cidr("100.64.0.1/33"),
+            "/33 exceeds IPv4's 32-bit width by exactly one"
+        );
+    }
+
+    #[test]
+    fn ipv6_cidr_at_max_prefix_passes() {
+        assert!(
+            is_valid_cidr("fd7a:115c:a1e0::1/128"),
+            "/128 is a valid IPv6 host route"
+        );
+    }
+
+    // WHY: `prefix_length_out_of_range_fails` above only covers IPv4 --
+    // an IPv6 `max_prefix` miscomputed as anything below 128 or above 128
+    // needs its own boundary fixture on the V6 arm specifically.
+    #[test]
+    fn ipv6_cidr_one_past_max_prefix_fails() {
+        assert!(
+            !is_valid_cidr("fd7a:115c:a1e0::1/129"),
+            "/129 exceeds IPv6's 128-bit width by exactly one"
+        );
+    }
+
+    #[test]
+    fn zero_prefix_passes() {
+        assert!(
+            is_valid_cidr("0.0.0.0/0"),
+            "/0 is the valid default-route prefix"
+        );
+    }
+
+    #[test]
+    fn non_numeric_prefix_fails() {
+        assert!(!is_valid_cidr("100.64.0.1/abc"));
+    }
+
+    #[test]
+    fn empty_prefix_fails() {
+        assert!(!is_valid_cidr("100.64.0.1/"));
+    }
+
+    #[test]
+    fn negative_prefix_fails() {
+        assert!(!is_valid_cidr("100.64.0.1/-1"));
+    }
+
+    // WHY: pins the split-on-first-slash behavior documented above --
+    // a second `/` must land in the prefix half and fail parse::<u8>,
+    // never get reinterpreted as part of a still-valid address.
+    #[test]
+    fn double_slash_fails() {
+        assert!(!is_valid_cidr("100.64.0.1/32/1"));
     }
 
     #[test]
