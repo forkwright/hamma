@@ -17,6 +17,7 @@ use koinon::telemetry;
 use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
+use zeroize::Zeroizing;
 
 const CONTROL_URL: &str = "https://controlplane.tailscale.com";
 
@@ -89,8 +90,13 @@ async fn main() -> Result<(), ExampleError> {
 }
 
 async fn run() -> Result<(), ExampleError> {
+    // WHY: `std::env::var` is wrapped in `Zeroizing` in the same statement
+    // that allocates it, mirroring `AuthInfo::new` (mitos/src/types/mod.rs)
+    // — no unwrapped copy of the raw secret is ever bound to a separate
+    // variable, so there is nothing left for a core dump or `/proc/<pid>/mem`
+    // read to recover once this value is dropped.
     let auth_key = match std::env::var("TS_AUTHKEY") {
-        Ok(value) => Some(value),
+        Ok(value) => Some(Zeroizing::new(value)),
         Err(std::env::VarError::NotPresent) => {
             warn!("TS_AUTHKEY not set - server will require interactive auth");
             None
@@ -123,7 +129,17 @@ async fn run() -> Result<(), ExampleError> {
         disco_key,
     );
 
-    register_node(&mut client, &mut stream, auth_key.as_deref()).await?;
+    register_node(
+        &mut client,
+        &mut stream,
+        auth_key.as_deref().map(String::as_str),
+    )
+    .await?;
+    // WHY: auth_key is only needed for registration; stream_map below runs
+    // until interrupted, so dropping here — rather than letting it live to
+    // the end of `run` — bounds how long the zeroizing allocation backing
+    // this reusable, session-independent secret stays resident.
+    drop(auth_key);
     stream_map(&mut client, &mut stream).await?;
     Ok(())
 }
