@@ -7,7 +7,6 @@ on:
       - "shared/bin/**"
       - ".github/workflows/ci.yml"
   pull_request:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
