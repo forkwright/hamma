@@ -26,7 +26,7 @@ use std::fmt;
 /// the value this client already spoke at its most-implemented call site
 /// (the `/key` endpoint) before the three control-plane version numbers
 /// were unified here; it covers the capabilities Phase A actually
-/// implements (peer WireGuard, registration, full/delta map streaming).
+/// implements (peer `WireGuard`, registration, full/delta map streaming).
 /// Bumping it is a protocol claim -- "hamma implements everything through
 /// vN" -- not a tuning knob: pair any change with the feature that earns it.
 pub const CAPABILITY_VERSION: CapabilityVersion = CapabilityVersion(71);
