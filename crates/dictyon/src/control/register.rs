@@ -229,10 +229,10 @@ mod tests {
 
         let outcome = classify_register_response(resp);
 
-        assert!(
-            matches!(outcome, RegisterOutcome::Rejected { reason } if reason == "account suspended"),
-            "expected Rejected, got {outcome:?}"
-        );
+        match outcome {
+            RegisterOutcome::Rejected { reason } => assert_eq!(reason, "account suspended"),
+            other => panic!("expected Rejected, got {other:?}"),
+        }
     }
 
     /// A present-but-empty `Error` carries no information, matching how the
