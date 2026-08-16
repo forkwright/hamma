@@ -101,6 +101,13 @@ fn register_request_omits_none_fields() {
         json.contains("\"Auth\""),
         "Some Auth should be present: {json}"
     );
+    // `"Auth"` alone would still pass for a nested AuthKey that were
+    // missing, empty, or wrong-shaped ("Auth":{} also contains "Auth") —
+    // pin the exact nested value so this test can actually fail on that.
+    assert!(
+        json.contains("\"AuthKey\":\"tskey-auth-test\""),
+        "AuthKey value should be present under Auth: {json}"
+    );
 }
 
 #[test]

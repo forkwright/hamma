@@ -79,6 +79,14 @@ fn register_request_serializes_to_json() {
         json.contains("\"dictyon/0.1.0\""),
         "GoVersion value wrong: {json}"
     );
+    // The AuthKey field must survive the String -> Zeroizing<String>
+    // wrapper unchanged: exact value, not merely "Auth present" (Zeroizing's
+    // serde impl delegates to String's, but that delegation is exactly what
+    // this test exists to hold in place).
+    assert!(
+        json.contains("\"AuthKey\":\"tskey-auth-test\""),
+        "AuthKey value wrong: {json}"
+    );
 
     // Followup should be omitted when None
     assert!(
