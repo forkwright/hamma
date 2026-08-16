@@ -13,6 +13,7 @@
 //!
 //! See `control/controlbase/` in the Tailscale Go source for reference.
 
+use mitos::capability::CAPABILITY_VERSION;
 use mitos::config::NoiseConfig;
 use mitos::keys::{MachinePrivate, MachinePublic};
 use snafu::Snafu;
@@ -34,11 +35,6 @@ use tracing::debug;
 /// and breaks wire compatibility with every peer. Do not parameterize.
 const NOISE_PARAMS: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-/// Current protocol version for the Noise handshake.
-///
-/// Wire-format invariant: peers key their prologue off this value.
-const PROTOCOL_VERSION: u16 = 1;
-
 /// Message type for the initiator's first message.
 const MSG_TYPE_INITIATION: u8 = 0x01;
 
@@ -58,9 +54,9 @@ const TAG_LEN: usize = 16;
 // and [`NoiseTransport::encrypt`] for consumption.
 
 /// Prologue mixed into the handshake hash, binding the session to the
-/// Tailscale control protocol and its version.
+/// Tailscale control protocol and [`CAPABILITY_VERSION`].
 fn prologue() -> Vec<u8> {
-    format!("Tailscale Control Protocol v{PROTOCOL_VERSION}").into_bytes()
+    format!("Tailscale Control Protocol v{CAPABILITY_VERSION}").into_bytes()
 }
 
 /// Errors that can occur during the Noise handshake or transport.
@@ -219,13 +215,22 @@ impl NoiseHandshake {
         let noise_len = handshake.write_message(&[], &mut noise_msg)?;
         noise_msg.truncate(noise_len);
 
-        // Frame: [2B version LE][1B msg_type][2B payload_len BE][noise_msg]
+        // Frame: [2B version BE][1B msg_type][2B payload_len BE][noise_msg]
+        //
+        // WARNING: the version field MUST be big-endian
+        // (`control/controlbase/messages.go` in the Tailscale Go source
+        // writes it via `binary.BigEndian.PutUint16`). A little-endian
+        // encoding swaps the two bytes, so a conforming peer decodes a
+        // different capability version than the one this client believes
+        // it advertised -- the two sides then mix different prologues into
+        // the handshake hash and the transcript cannot authenticate. See
+        // CapabilityVersion::to_be_bytes in mitos::capability.
         let payload_len = u16::try_from(noise_len).map_err(|_| NoiseError::HandshakeFailed {
             message: "initiation message too large".into(),
         })?;
 
         let mut framed = Vec::with_capacity(5 + noise_len);
-        framed.extend_from_slice(&PROTOCOL_VERSION.to_le_bytes());
+        framed.extend_from_slice(&CAPABILITY_VERSION.to_be_bytes());
         framed.push(MSG_TYPE_INITIATION);
         framed.extend_from_slice(&payload_len.to_be_bytes());
         framed.extend_from_slice(&noise_msg);

@@ -10,8 +10,10 @@
 
 #![deny(missing_docs)]
 
+pub mod capability;
 pub mod config;
 pub mod keys;
 pub mod types;
 
+pub use capability::CAPABILITY_VERSION;
 pub use config::Config;

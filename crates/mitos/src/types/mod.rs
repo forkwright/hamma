@@ -29,6 +29,12 @@ use zeroize::Zeroizing;
 /// impl that this derive calls into.
 #[derive(Debug, Serialize)] // kanon:ignore RUST/no-debug-derive-on-public-types -- see NOTE
 pub struct RegisterRequest {
+    /// Control-plane capability version. See
+    /// [`crate::capability::CAPABILITY_VERSION`] -- every construction site
+    /// must derive this from that constant, never restate a literal.
+    #[serde(rename = "Version")]
+    pub version: u64,
+
     /// The current node key, serialized as `"nodekey:hex..."`.
     ///
     /// This is the *public* key half of the node keypair (typed hex
@@ -205,7 +211,9 @@ pub struct RegisterResponse {
 /// secret.
 #[derive(Debug, Serialize)] // kanon:ignore RUST/no-debug-derive-on-public-types -- see NOTE
 pub struct MapRequest {
-    /// Protocol capability version.
+    /// Control-plane capability version. See
+    /// [`crate::capability::CAPABILITY_VERSION`] -- every construction site
+    /// must derive this from that constant, never restate a literal.
     #[serde(rename = "Version")]
     pub version: u64,
 

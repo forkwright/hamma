@@ -42,6 +42,7 @@ fn node_with_addresses_still_decodes_them() {
 #[test]
 fn register_request_serializes_to_json() {
     let req = RegisterRequest {
+        version: crate::capability::CAPABILITY_VERSION.as_u64(),
         node_key: "nodekey:abc123".to_string(),
         old_node_key: String::new(),
         auth: Some(AuthInfo::new("tskey-auth-test")),
@@ -57,6 +58,7 @@ fn register_request_serializes_to_json() {
     let json = serde_json::to_string(&req).expect("serialization should succeed");
 
     // Verify PascalCase field names from the Tailscale protocol
+    assert!(json.contains("\"Version\""), "missing Version: {json}");
     assert!(json.contains("\"NodeKey\""), "missing NodeKey: {json}");
     assert!(
         json.contains("\"OldNodeKey\""),
@@ -305,6 +307,7 @@ fn auth_info_debug_redacts_the_pre_auth_key() {
 #[test]
 fn register_request_debug_does_not_leak_the_nested_pre_auth_key() {
     let request = RegisterRequest {
+        version: crate::capability::CAPABILITY_VERSION.as_u64(),
         node_key: "nodekey:abc".to_string(),
         old_node_key: String::new(),
         auth: Some(AuthInfo::new("tskey-auth-kSeCrEtValue")),
