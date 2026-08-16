@@ -205,5 +205,36 @@ fn register_response_parses_auth_url_variant() {
         Some("https://login.tailscale.com/a/abc")
     );
     assert!(!resp.machine_authorized);
-    assert!(resp.node_key_expiry.is_none());
+    assert!(!resp.node_key_expired);
+    assert!(resp.error.is_none());
+}
+
+/// The reference control server's full `RegisterResponse` shape includes
+/// `Error` and `NodeKeyExpired` alongside `MachineAuthorized` and
+/// `AuthURL` -- all four must reach the public API, not just the two this
+/// crate originally modeled.
+#[test]
+fn register_response_parses_error_and_node_key_expired() {
+    let json = r#"{
+        "Error": "invalid auth key",
+        "MachineAuthorized": false,
+        "NodeKeyExpired": true
+    }"#;
+    let resp: RegisterResponse = serde_json::from_str(json).expect("full variant parses");
+    assert_eq!(resp.error.as_deref(), Some("invalid auth key"));
+    assert!(resp.node_key_expired);
+    assert!(!resp.machine_authorized);
+    assert!(resp.auth_url.is_none());
+}
+
+/// The reference server marshals its zero values (`""`, `false`) rather
+/// than omitting fields; a response naming none of them must still parse,
+/// with every field at its absent/false default.
+#[test]
+fn register_response_missing_fields_default_to_absent() {
+    let resp: RegisterResponse = serde_json::from_str("{}").expect("empty object parses");
+    assert!(resp.auth_url.is_none());
+    assert!(!resp.machine_authorized);
+    assert!(!resp.node_key_expired);
+    assert!(resp.error.is_none());
 }
