@@ -57,8 +57,7 @@ fn has_bin_target(crate_dir: &Path, manifest_path: &Path) -> Result<bool, Corpus
     let has_main_rs = crate_dir.join("src/main.rs").is_file();
 
     let has_bin_dir_entries = fs::read_dir(crate_dir.join("src/bin"))
-        .map(|mut entries| entries.find_map(Result::ok).is_some())
-        .unwrap_or(false);
+        .is_ok_and(|mut entries| entries.find_map(Result::ok).is_some());
 
     Ok(declares_bin_section || has_main_rs || has_bin_dir_entries)
 }
