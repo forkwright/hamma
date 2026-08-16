@@ -25,6 +25,7 @@ zstd = { workspace = true }
 proptest = { workspace = true }
 rcgen = "0.13"
 koinon = { workspace = true }
+zeroize = { workspace = true }
 
 [lints]
 workspace = true

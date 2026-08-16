@@ -9,6 +9,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -64,11 +65,40 @@ pub struct RegisterRequest {
 /// the [`RegisterRequest`] that owns it — a log line, an error context, a panic
 /// payload. The redaction mirrors the one on private key types in
 /// [`crate::keys`].
+///
+/// WARNING: `auth_key` is `Zeroizing<String>`, not `String`, for the same
+/// reason the private key types in [`crate::keys`] zero their backing bytes
+/// on drop: a pre-auth key authorizes unattended device enrollment and is
+/// reusable across sessions, so a heap allocation left holding it after use
+/// is a recoverable credential in a core dump, `/proc/<pid>/mem`, or swap.
+/// `zeroize`'s `serde` feature gives `Zeroizing<String>` the same
+/// `Serialize` impl `String` has, so the wire format is unchanged. The
+/// field stays crate-private; construct through [`AuthInfo::new`] so the
+/// raw key text passes through exactly one allocation, wrapped immediately,
+/// with no separate unwrapped copy left behind at the call site. `new` is
+/// also the only way to reach a non-empty `Auth` object: a bare
+/// `auth_key: None` would serialize as `"Auth":{}` instead of omitting the
+/// field entirely, a wire shape no real caller wants.
 #[derive(Serialize)]
 pub struct AuthInfo {
-    /// Pre-auth key value (e.g. `tskey-auth-...`).
+    /// Pre-auth key value (e.g. `tskey-auth-...`), zeroed on drop.
     #[serde(rename = "AuthKey", skip_serializing_if = "Option::is_none")]
-    pub auth_key: Option<String>,
+    pub(crate) auth_key: Option<Zeroizing<String>>,
+}
+
+impl AuthInfo {
+    /// Wrap a pre-auth key so its backing allocation is zeroed when this
+    /// value (or the [`RegisterRequest`] that owns it) is dropped.
+    ///
+    /// Time: O(n) — copies `auth_key`'s bytes into a fresh allocation, where
+    /// `n` is `auth_key.len()`.
+    /// Space: O(n) — one allocation the size of `auth_key`.
+    #[must_use]
+    pub fn new(auth_key: &str) -> Self {
+        Self {
+            auth_key: Some(Zeroizing::new(auth_key.to_string())),
+        }
+    }
 }
 
 impl fmt::Debug for AuthInfo {
