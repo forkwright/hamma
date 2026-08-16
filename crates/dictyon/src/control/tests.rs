@@ -443,7 +443,7 @@ fn map_request_advertises_zstd_compression() {
 /// each one only checks its own request against the shared constant, not
 /// against its sibling. This test compares the two live JSON payloads to
 /// each other, so a one-sided hardcode fails it even if that hardcoded
-/// value happens to equal the current CAPABILITY_VERSION by coincidence
+/// value happens to equal the current [`CAPABILITY_VERSION`] by coincidence
 /// today.
 #[test]
 fn register_and_map_requests_advertise_the_same_capability_version() {

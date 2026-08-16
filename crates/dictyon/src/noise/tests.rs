@@ -436,7 +436,7 @@ proptest::proptest! {
         assert_eq!(decrypted, payload, "decrypted payload must equal original");
     }
 
-    /// Payloads larger than MAX_FRAME_PAYLOAD must be rejected at encrypt time.
+    /// Payloads larger than `MAX_FRAME_PAYLOAD` must be rejected at encrypt time.
     #[test]
     fn transport_oversized_payload_rejected(
         extra in 1usize..=256usize
