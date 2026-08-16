@@ -3,6 +3,8 @@
 //! Split into a sibling file because tests.rs + these exceeded the
 //! `RUST/file-too-long` threshold.
 
+use mitos::types::MapResponse;
+
 use super::*;
 
 /// Build `count` distinct peers, numbered from `first_id`.
@@ -10,11 +12,7 @@ fn sample_peers(first_id: i64, count: usize) -> Vec<Node> {
     (0..count)
         .map(|offset| {
             let id = first_id + i64::try_from(offset).expect("peer count fits i64");
-            sample_node(
-                id,
-                &format!("nodekey:peer{id}"),
-                &format!("peer{id}.ts.net."),
-            )
+            sample_node(id, &format!("peer{id}.ts.net."))
         })
         .collect()
 }
@@ -22,7 +20,7 @@ fn sample_peers(first_id: i64, count: usize) -> Vec<Node> {
 /// A full [`MapResponse`] carrying `peers` and nothing else of interest.
 fn full_response_with(peers: Vec<Node>) -> MapResponse {
     MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
+        node: Some(sample_node(1, "self.ts.net.")),
         peers: Some(peers),
         peers_changed: None,
         peers_changed_patch: None,
@@ -99,7 +97,7 @@ fn apply_map_response_updates_a_known_peer_at_the_cap() {
     // WHY: an update to a peer already held is not growth. Refusing it would
     // freeze the netmap's contents for as long as it sits at the cap, so this
     // pins that the cap bounds length alone.
-    let mut updated = sample_node(2, "nodekey:peer2", "peer2-updated.ts.net.");
+    let mut updated = sample_node(2, "peer2-updated.ts.net.");
     updated.online = Some(true);
 
     let delta = MapResponse {

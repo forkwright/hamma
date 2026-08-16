@@ -733,11 +733,15 @@ fn frame_control_payload(payload: &[u8]) -> Vec<u8> {
     frame
 }
 
+// WHY(#55): `Key` must be valid `NodePublic` hex -- `Netmap::from_full_response`
+// now validates it and would otherwise silently fall back to a zero-value
+// self node / drop the peer, turning this fixture's own assertions into
+// false negatives for what they claim to exercise.
 const FULL_MAP_RESPONSE_JSON: &[u8] = br#"{
     "Node": {
         "ID": 100,
         "StableID": "node-self",
-        "Key": "nodekey:self",
+        "Key": "nodekey:0000000000000000000000000000000000000000000000000000000000000064",
         "Name": "self.tail.test.",
         "Addresses": ["100.64.0.1/32"],
         "Online": true
@@ -745,7 +749,7 @@ const FULL_MAP_RESPONSE_JSON: &[u8] = br#"{
     "Peers": [
         {
             "ID": 200,
-            "Key": "nodekey:peer",
+            "Key": "nodekey:00000000000000000000000000000000000000000000000000000000000000c8",
             "Name": "peer.tail.test.",
             "Addresses": ["100.64.0.2/32"],
             "Endpoints": ["203.0.113.10:41641"],
