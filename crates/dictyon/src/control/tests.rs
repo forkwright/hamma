@@ -8,12 +8,15 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
-use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use hamma_core::types::{DnsConfig, DnsResolver, MapResponse, Node, PeerChange, PeerRemoval};
+use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use mitos::types::Node;
 
 use super::*;
 
-// WHY: a sibling file so neither module crosses the file-length limit.
+// WHY: siblings so no one file crosses the file-length limit. `netmap_tests`
+// covers `Netmap`/`apply_map_response` merge semantics; `peer_cap_tests`
+// covers the `MAX_PEERS` bound specifically.
+mod netmap_tests;
 mod peer_cap_tests;
 
 /// Build a `ControlClient` with a paired transport for unit testing.
@@ -32,7 +35,8 @@ fn paired_client() -> ControlClient {
     let params: snow::params::NoiseParams = "Noise_IK_25519_ChaChaPoly_BLAKE2s"
         .parse()
         .expect("params should parse");
-    let prologue = b"Tailscale Control Protocol v1";
+    let prologue = format!("Tailscale Control Protocol v{CAPABILITY_VERSION}").into_bytes();
+    let prologue = prologue.as_slice();
 
     let mut initiator = snow::Builder::new(params)
         .local_private_key(machine_key.as_bytes())
@@ -84,11 +88,29 @@ fn paired_client() -> ControlClient {
     ControlClient::new(conn, client_machine, node_key, disco_key)
 }
 
-fn sample_node(id: i64, key: &str, name: &str) -> Node {
+/// Deterministic, valid `nodekey:` hex string for test peer `id`.
+///
+/// WHY: `Node.key` is validated at netmap ingestion (issue #55), so a test
+/// fixture needs a real 64-hex-digit key, not a readable placeholder. `id`
+/// is embedded directly so a peer's key and its `Node.id` stay trivially
+/// correlated when reading an assertion failure.
+fn hex_node_key(id: i64) -> String {
+    format!("nodekey:{id:064x}")
+}
+
+/// Deterministic, valid `discokey:` hex string, keyed by an arbitrary tag
+/// rather than a `Node.id` -- used where the test needs a disco key that
+/// does not correspond to any constructed [`Node`] (e.g. a patch that
+/// rotates one).
+fn hex_disco_key(tag: i64) -> String {
+    format!("discokey:{tag:064x}")
+}
+
+fn sample_node(id: i64, name: &str) -> Node {
     Node {
         id,
         stable_id: None,
-        key: key.to_string(),
+        key: hex_node_key(id),
         machine: None,
         name: name.to_string(),
         cap: None,
@@ -112,268 +134,6 @@ fn netmap_starts_empty() {
 }
 
 #[test]
-fn apply_map_response_sets_initial_peers() {
-    let mut client = paired_client();
-
-    let resp = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![
-            sample_node(2, "nodekey:peer1", "peer1.ts.net."),
-            sample_node(3, "nodekey:peer2", "peer2.ts.net."),
-        ]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: Some(DnsConfig {
-            resolvers: Some(vec![DnsResolver {
-                addr: "100.100.100.100".to_string(),
-            }]),
-            domains: Some(vec!["example.ts.net".to_string()]),
-        }),
-        derp_map: None,
-        keep_alive: None,
-    };
-
-    client.apply_map_response(resp);
-
-    let self_node = client.self_node().expect("self_node should be set");
-    assert_eq!(self_node.key, "nodekey:self");
-    assert_eq!(client.peers().len(), 2);
-    assert_eq!(client.peers()[0].key, "nodekey:peer1");
-    assert_eq!(client.peers()[1].key, "nodekey:peer2");
-
-    let netmap = client.netmap.as_ref().expect("netmap should exist");
-    let dns = netmap.dns_config.as_ref().expect("dns_config should exist");
-    let resolvers = dns.resolvers.as_ref().expect("resolvers should exist");
-    assert_eq!(resolvers[0].addr, "100.100.100.100");
-}
-
-#[test]
-fn apply_map_response_delta_adds_peers() {
-    let mut client = paired_client();
-
-    // Initial full response.
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![sample_node(2, "nodekey:peer1", "peer1.ts.net.")]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-    assert_eq!(client.peers().len(), 1);
-
-    // Delta: add a new peer and update existing one.
-    let mut updated_peer1 = sample_node(2, "nodekey:peer1", "peer1-updated.ts.net.");
-    updated_peer1.online = Some(true);
-
-    let delta = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: Some(vec![
-            updated_peer1,
-            sample_node(4, "nodekey:peer3", "peer3.ts.net."),
-        ]),
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(delta);
-
-    assert_eq!(client.peers().len(), 2);
-    // Existing peer should be updated.
-    assert_eq!(client.peers()[0].name, "peer1-updated.ts.net.");
-    assert_eq!(client.peers()[0].online, Some(true));
-    // New peer should be appended.
-    assert_eq!(client.peers()[1].key, "nodekey:peer3");
-}
-
-#[test]
-fn apply_map_response_removes_peers() {
-    let mut client = paired_client();
-
-    // Initial full response with three peers.
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![
-            sample_node(2, "nodekey:peer1", "peer1.ts.net."),
-            sample_node(3, "nodekey:peer2", "peer2.ts.net."),
-            sample_node(4, "nodekey:peer3", "peer3.ts.net."),
-        ]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-    assert_eq!(client.peers().len(), 3);
-
-    // Delta: remove peer2.
-    let delta = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: Some(vec![PeerRemoval::NodeKey("nodekey:peer2".to_string())]),
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(delta);
-
-    assert_eq!(client.peers().len(), 2);
-    assert_eq!(client.peers()[0].key, "nodekey:peer1");
-    assert_eq!(client.peers()[1].key, "nodekey:peer3");
-}
-
-#[test]
-fn apply_map_response_removes_peers_by_node_id() {
-    let mut client = paired_client();
-
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![
-            sample_node(2, "nodekey:peer1", "peer1.ts.net."),
-            sample_node(3, "nodekey:peer2", "peer2.ts.net."),
-            sample_node(4, "nodekey:peer3", "peer3.ts.net."),
-        ]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-
-    let delta = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: Some(vec![PeerRemoval::NodeId(3)]),
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(delta);
-
-    assert_eq!(client.peers().len(), 2);
-    assert_eq!(client.peers()[0].id, 2);
-    assert_eq!(client.peers()[1].id, 4);
-}
-
-#[test]
-fn apply_map_response_applies_peer_patch_to_known_peer() {
-    let mut client = paired_client();
-
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![sample_node(2, "nodekey:peer1", "peer1.ts.net.")]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-
-    let delta = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: None,
-        peers_changed_patch: Some(vec![PeerChange {
-            node_id: 2,
-            derp_region: Some(7),
-            cap: Some(69),
-            cap_map: None,
-            endpoints: Some(vec!["203.0.113.10:41641".to_string()]),
-            key: Some("nodekey:peer1-rotated".to_string()),
-            disco_key: Some("discokey:peer1".to_string()),
-            online: Some(true),
-            last_seen: Some("2026-05-25T12:00:00Z".to_string()),
-            key_expiry: Some("2026-06-25T12:00:00Z".to_string()),
-        }]),
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(delta);
-
-    let peer = &client.peers()[0];
-    assert_eq!(peer.id, 2);
-    assert_eq!(peer.derp.as_deref(), Some("127.3.3.40:7"));
-    assert_eq!(peer.cap, Some(69));
-    assert_eq!(
-        peer.endpoints.as_deref(),
-        Some(["203.0.113.10:41641".to_string()].as_slice())
-    );
-    assert_eq!(peer.key, "nodekey:peer1-rotated");
-    assert_eq!(peer.disco_key.as_deref(), Some("discokey:peer1"));
-    assert_eq!(peer.online, Some(true));
-    assert_eq!(peer.last_seen.as_deref(), Some("2026-05-25T12:00:00Z"));
-    assert_eq!(peer.key_expiry.as_deref(), Some("2026-06-25T12:00:00Z"));
-}
-
-#[test]
-fn apply_map_response_ignores_peer_patch_for_unknown_peer() {
-    let mut client = paired_client();
-
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![sample_node(2, "nodekey:peer1", "peer1.ts.net.")]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-
-    let delta = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: None,
-        peers_changed_patch: Some(vec![PeerChange {
-            node_id: 99,
-            derp_region: Some(7),
-            cap: Some(69),
-            cap_map: None,
-            endpoints: Some(vec!["203.0.113.10:41641".to_string()]),
-            key: Some("nodekey:unknown".to_string()),
-            disco_key: Some("discokey:unknown".to_string()),
-            online: Some(true),
-            last_seen: Some("2026-05-25T12:00:00Z".to_string()),
-            key_expiry: Some("2026-06-25T12:00:00Z".to_string()),
-        }]),
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(delta);
-
-    assert_eq!(client.peers().len(), 1);
-    let peer = &client.peers()[0];
-    assert_eq!(peer.id, 2);
-    assert_eq!(peer.key, "nodekey:peer1");
-    assert!(peer.derp.is_none());
-    assert!(peer.endpoints.is_none());
-    assert!(peer.disco_key.is_none());
-    assert!(peer.online.is_none());
-}
-
-#[test]
 fn register_builds_correct_json() {
     let client = paired_client();
     let payload = client
@@ -387,6 +147,11 @@ fn register_builds_correct_json() {
     assert!(json.get("NodeKey").is_some(), "missing NodeKey");
     assert!(json.get("OldNodeKey").is_some(), "missing OldNodeKey");
     assert!(json.get("Hostinfo").is_some(), "missing Hostinfo");
+    assert_eq!(
+        json["Version"].as_u64(),
+        Some(CAPABILITY_VERSION.as_u64()),
+        "RegisterRequest.Version must derive from the shared CAPABILITY_VERSION"
+    );
 
     // NodeKey should be a proper nodekey: prefixed string.
     let node_key = json["NodeKey"].as_str().expect("NodeKey should be string");
@@ -419,10 +184,58 @@ fn map_request_advertises_zstd_compression() {
     let json: serde_json::Value =
         serde_json::from_slice(&payload).expect("payload should be valid JSON");
 
-    assert_eq!(json["Version"].as_u64(), Some(68));
+    assert_eq!(
+        json["Version"].as_u64(),
+        Some(CAPABILITY_VERSION.as_u64()),
+        "MapRequest.Version must derive from the shared CAPABILITY_VERSION"
+    );
     assert_eq!(json["Stream"].as_bool(), Some(true));
     assert_eq!(json["OmitPeers"].as_bool(), Some(false));
     assert_eq!(json["Compress"].as_str(), Some("zstd"));
+}
+
+/// WHY: the defect this issue fixes was three call sites each restating the
+/// capability version as an independent literal (1, 68, 71) that had
+/// silently drifted apart. A future regression that reintroduces a
+/// hardcoded literal at *one* call site while the others still derive from
+/// [`CAPABILITY_VERSION`] would pass every other test in this file --
+/// each one only checks its own request against the shared constant, not
+/// against its sibling. This test compares the two live JSON payloads to
+/// each other, so a one-sided hardcode fails it even if that hardcoded
+/// value happens to equal the current [`CAPABILITY_VERSION`] by coincidence
+/// today.
+#[test]
+fn register_and_map_requests_advertise_the_same_capability_version() {
+    let client = paired_client();
+
+    let register_payload = client
+        .build_register_request(None)
+        .expect("register request should build");
+    let register_json: serde_json::Value =
+        serde_json::from_slice(&register_payload).expect("register payload should be JSON");
+
+    let map_payload = client
+        .build_map_request()
+        .expect("map request should build");
+    let map_json: serde_json::Value =
+        serde_json::from_slice(&map_payload).expect("map payload should be JSON");
+
+    let register_version = register_json["Version"]
+        .as_u64()
+        .expect("RegisterRequest.Version should be a JSON number");
+    let map_version = map_json["Version"]
+        .as_u64()
+        .expect("MapRequest.Version should be a JSON number");
+
+    assert_eq!(
+        register_version, map_version,
+        "RegisterRequest and MapRequest must advertise identical capability versions"
+    );
+    assert_eq!(
+        register_version,
+        CAPABILITY_VERSION.as_u64(),
+        "the shared version must equal CAPABILITY_VERSION, not merely agree with itself"
+    );
 }
 
 #[test]
@@ -464,208 +277,6 @@ fn parse_map_response_rejects_truncated_frame() {
 
     let result = ControlClient::parse_map_response(&frame);
     assert!(result.is_err());
-}
-
-#[test]
-fn keepalive_does_not_modify_netmap() {
-    let mut client = paired_client();
-
-    // Initialize with a peer.
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![sample_node(2, "nodekey:peer1", "peer1.ts.net.")]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-    assert_eq!(client.peers().len(), 1);
-
-    // Keepalive should not change anything.
-    let keepalive = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: Some(true),
-    };
-    client.apply_map_response(keepalive);
-
-    assert_eq!(client.peers().len(), 1);
-    assert_eq!(client.peers()[0].key, "nodekey:peer1");
-}
-
-// -----------------------------------------------------------------------
-// Property tests
-// -----------------------------------------------------------------------
-
-proptest::proptest! {
-    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
-
-    /// After any sequence of delta updates the peer list has no duplicate
-    /// keys and every explicitly removed key is absent.
-    #[test]
-    fn netmap_delta_sequence_is_consistent(
-        // Number of initial peers: 1..=8
-        n_initial in 1usize..=8,
-        // Number of additional peers to add via peers_changed: 0..=4
-        n_add in 0usize..=4,
-        // Number of peers to remove (capped at n_initial): 0..=4
-        n_remove in 0usize..=4,
-    ) {
-        let mut client = paired_client();
-
-        // Build the initial full map response.
-        let initial_peers: Vec<Node> = (0..n_initial)
-            .map(|i| {
-                let id = i64::try_from(i).expect("test index fits i64") + 2;
-                sample_node(id, &format!("nodekey:peer{i}"), &format!("peer{i}.ts.net."))
-            })
-            .collect();
-
-        let initial = MapResponse {
-            node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-            peers: Some(initial_peers),
-            peers_changed: None,
-            peers_changed_patch: None,
-            peers_removed: None,
-            dns_config: None,
-            derp_map: None,
-            keep_alive: None,
-        };
-        client.apply_map_response(initial);
-        assert_eq!(client.peers().len(), n_initial);
-
-        // Add new peers via peers_changed.
-        if n_add > 0 {
-            let new_peers: Vec<Node> = (0..n_add)
-                .map(|i| {
-                    let idx = n_initial + i;
-                    let id = i64::try_from(idx).expect("test index fits i64") + 2;
-                    sample_node(
-                        id,
-                        &format!("nodekey:newpeer{idx}"),
-                        &format!("newpeer{idx}.ts.net."),
-                    )
-                })
-                .collect();
-            let delta = MapResponse {
-                node: None,
-                peers: None,
-                peers_changed: Some(new_peers),
-                peers_changed_patch: None,
-                peers_removed: None,
-                dns_config: None,
-                derp_map: None,
-                keep_alive: None,
-            };
-            client.apply_map_response(delta);
-            assert_eq!(client.peers().len(), n_initial + n_add);
-        }
-
-        // Remove up to n_remove of the original peers.
-        let n_to_remove = n_remove.min(n_initial);
-        let removed_keys: Vec<String> = (0..n_to_remove).map(|i| format!("nodekey:peer{i}")).collect();
-        let removals: Vec<PeerRemoval> = removed_keys
-            .iter()
-            .cloned()
-            .map(PeerRemoval::NodeKey)
-            .collect();
-
-        if n_to_remove > 0 {
-            let delta = MapResponse {
-                node: None,
-                peers: None,
-                peers_changed: None,
-                peers_changed_patch: None,
-                peers_removed: Some(removals),
-                dns_config: None,
-                derp_map: None,
-                keep_alive: None,
-            };
-            client.apply_map_response(delta);
-        }
-
-        let final_peers = client.peers();
-        let expected_count = n_initial + n_add - n_to_remove;
-        assert_eq!(
-            final_peers.len(),
-            expected_count,
-            "peer count after add={n_add} remove={n_to_remove} should be {expected_count}"
-        );
-
-        // Invariant: no duplicate keys.
-        let mut seen_keys = std::collections::HashSet::new();
-        for peer in final_peers {
-            let is_new = seen_keys.insert(peer.key.clone());
-            assert!(is_new, "duplicate peer key found: {}", peer.key);
-        }
-
-        // Invariant: all removed keys are absent.
-        for removed_key in &removed_keys {
-            assert!(
-                !seen_keys.contains(removed_key),
-                "removed key should not be present: {removed_key}"
-            );
-        }
-    }
-}
-
-#[test]
-fn apply_map_response_removes_peers_named_by_either_identifier_in_one_delta() {
-    // WHY(#55): the removal sweep now indexes the removal list instead of
-    // rescanning it per peer. Both identifier kinds, and a removal naming a
-    // peer that is not present, must behave exactly as the linear scan did.
-    let mut client = paired_client();
-
-    let initial = MapResponse {
-        node: Some(sample_node(1, "nodekey:self", "self.ts.net.")),
-        peers: Some(vec![
-            sample_node(2, "nodekey:peer1", "peer1.ts.net."),
-            sample_node(3, "nodekey:peer2", "peer2.ts.net."),
-            sample_node(4, "nodekey:peer3", "peer3.ts.net."),
-            sample_node(5, "nodekey:peer4", "peer4.ts.net."),
-        ]),
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: None,
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(initial);
-    assert_eq!(client.peers().len(), 4);
-
-    let delta = MapResponse {
-        node: None,
-        peers: None,
-        peers_changed: None,
-        peers_changed_patch: None,
-        peers_removed: Some(vec![
-            PeerRemoval::NodeId(3),
-            PeerRemoval::NodeKey("nodekey:peer4".to_string()),
-            PeerRemoval::NodeId(3),
-            PeerRemoval::NodeId(999),
-            PeerRemoval::NodeKey("nodekey:absent".to_string()),
-        ]),
-        dns_config: None,
-        derp_map: None,
-        keep_alive: None,
-    };
-    client.apply_map_response(delta);
-
-    let remaining: Vec<&str> = client.peers().iter().map(|p| p.key.as_str()).collect();
-    assert_eq!(
-        remaining,
-        vec!["nodekey:peer1", "nodekey:peer3"],
-        "removals by id and by key must both apply, and unmatched removals must be inert"
-    );
 }
 
 #[test]

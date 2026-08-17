@@ -17,12 +17,11 @@
 //! - `control/controlclient/direct.go` in the Tailscale Go source
 //! - `tailcfg/tailcfg.go` for type definitions
 
-use std::collections::HashSet;
-
-use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
-use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, Hostinfo, MapRequest, MapResponse, Node, PeerChange, PeerRemoval,
-    RegisterRequest, RegisterResponse,
+use mitos::capability::CAPABILITY_VERSION;
+use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
+use mitos::types::{
+    AuthInfo, BackendLogId, Hostinfo, MapRequest, MapResponse, Node, RegisterRequest,
+    RegisterResponse,
 };
 use snafu::Snafu;
 use tracing::{debug, warn};
@@ -30,14 +29,19 @@ use tracing::{debug, warn};
 use crate::transport::ControlConnection;
 use crate::wire::AsyncControlStream;
 
-/// Upper bound on the peers a netmap retains from a coordination server.
-///
-/// WHY: every peer-bearing field of a [`MapResponse`] is server-controlled and
-/// unbounded on the wire, so a misbehaving or hostile server can grow
-/// [`Netmap::peers`] without limit across a single connection. The cap sits far
-/// above any realistic tailnet, so it is unreachable in normal operation and
-/// only bounds the memory one connection can commit.
-const MAX_PEERS: usize = 10_000;
+mod netmap;
+mod register;
+mod validate;
+
+pub use netmap::Netmap;
+// WHY(cfg(test)): the only consumer is `control::tests` (via `use
+// super::*`), which is itself `#[cfg(test)]` -- a non-test `cargo check`
+// never compiles that consumer, so an unconditional re-export here reads as
+// unused outside test builds even though test builds do use it.
+#[cfg(test)]
+pub(crate) use netmap::MAX_PEERS;
+use register::classify_register_response;
+pub use register::{NonEmptyUrl, RegisterFault, RegisterOutcome};
 
 /// Errors from control protocol operations.
 #[derive(Debug, Snafu)]
@@ -96,134 +100,6 @@ impl From<serde_json::Error> for ControlError {
 impl From<crate::wire::WireError> for ControlError {
     fn from(source: crate::wire::WireError) -> Self {
         Self::Wire { source }
-    }
-}
-
-/// Outcome of an async registration attempt.
-///
-/// When the machine already has a valid pre-auth key, the server
-/// authorizes it immediately ([`RegisterOutcome::Authorized`]). Otherwise,
-/// the user must visit an auth URL ([`RegisterOutcome::NeedsAuth`]).
-#[non_exhaustive]
-pub enum RegisterOutcome {
-    /// The node was authorized; contains the server's registration response.
-    Authorized(RegisterResponse),
-    /// Interactive auth is required; the user must visit this URL.
-    NeedsAuth {
-        /// URL the user must visit to authorize this node.
-        auth_url: String,
-    },
-}
-
-/// The local view of the network map, maintained by applying
-/// [`MapResponse`] updates.
-///
-/// Starts empty and is populated by the first full map response.
-/// Subsequent delta responses update it incrementally.
-#[derive(Debug)]
-pub struct Netmap {
-    /// This node's own information.
-    pub self_node: Node,
-    /// Known peers in the tailnet.
-    pub peers: Vec<Node>,
-    /// Current DNS configuration.
-    pub dns_config: Option<DnsConfig>,
-    /// Current DERP relay topology.
-    pub derp_map: Option<DerpMap>,
-}
-
-impl Netmap {
-    /// Build a netmap from the first full [`MapResponse`].
-    ///
-    /// A missing self node falls back to a zero-value [`Node`]; missing
-    /// peers default to an empty list.
-    fn from_full_response(resp: MapResponse) -> Self {
-        let self_node = resp.node.unwrap_or_else(|| Node {
-            id: 0,
-            stable_id: None,
-            key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
-            machine: None,
-            name: String::new(),
-            cap: None,
-            tags: None,
-            addresses: Vec::new(),
-            allowed_ips: None,
-            endpoints: None,
-            derp: None,
-            disco_key: None,
-            key_expiry: None,
-            last_seen: None,
-            online: None,
-        });
-
-        let mut peers = resp.peers.unwrap_or_default();
-        cap_peers(&mut peers);
-
-        Self {
-            self_node,
-            peers,
-            dns_config: resp.dns_config,
-            derp_map: resp.derp_map,
-        }
-    }
-
-    /// Apply a delta [`MapResponse`] onto an already-initialized netmap.
-    ///
-    /// See [`ControlClient::apply_map_response`] for the merge semantics.
-    fn apply_delta(&mut self, resp: MapResponse) {
-        if let Some(node) = resp.node {
-            self.self_node = node;
-        }
-
-        // Full peer replacement (if server sends full list again).
-        if let Some(mut peers) = resp.peers {
-            cap_peers(&mut peers);
-            self.peers = peers;
-        }
-
-        // Incremental peer additions/changes.
-        if let Some(changed) = resp.peers_changed {
-            // WHY: counted rather than warned per peer, so a server sending a
-            // large over-cap delta costs one log line instead of one per peer.
-            let mut refused = 0usize;
-            for changed_peer in changed {
-                if let Some(existing) = self.peers.iter_mut().find(|p| p.key == changed_peer.key) {
-                    // WHY: an update to a peer already held is not growth, so it
-                    // still applies once the netmap has reached the cap.
-                    *existing = changed_peer;
-                } else if self.peers.len() < MAX_PEERS {
-                    self.peers.push(changed_peer);
-                } else {
-                    refused += 1;
-                }
-            }
-            if refused > 0 {
-                warn!(
-                    cap = MAX_PEERS,
-                    refused, "netmap is at the peer cap; refused new peers from a map response"
-                );
-            }
-        }
-
-        // Peer removals.
-        if let Some(removals) = resp.peers_removed {
-            let index = PeerRemovalIndex::build(&removals);
-            self.peers.retain(|peer| !index.removes(peer));
-        }
-
-        if let Some(changes) = resp.peers_changed_patch {
-            for change in changes {
-                apply_peer_change(&mut self.peers, change);
-            }
-        }
-
-        if let Some(dns) = resp.dns_config {
-            self.dns_config = Some(dns);
-        }
-
-        if let Some(derp) = resp.derp_map {
-            self.derp_map = Some(derp);
-        }
     }
 }
 
@@ -290,13 +166,17 @@ impl ControlClient {
     /// # Errors
     ///
     /// Returns [`ControlError::Json`] if serialization fails.
+    ///
+    /// Time: O(n) — dominated by `serde_json::to_vec` over the request,
+    /// where `n` is the serialized payload size.
+    /// Space: O(n) — the returned buffer plus the intermediate
+    /// [`RegisterRequest`].
     pub fn build_register_request(&self, auth_key: Option<&str>) -> Result<Vec<u8>, ControlError> {
         let req = RegisterRequest {
+            version: CAPABILITY_VERSION.as_u64(),
             node_key: self.node_key.public_key().to_hex(),
             old_node_key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
-            auth: auth_key.map(|k| AuthInfo {
-                auth_key: Some(k.to_string()),
-            }),
+            auth: auth_key.map(AuthInfo::new),
             hostinfo: self.hostinfo(),
             followup: None,
         };
@@ -307,13 +187,18 @@ impl ControlClient {
 
     /// Register this node asynchronously using an [`AsyncControlStream`].
     ///
-    /// Serializes a [`RegisterRequest`], sends it over the stream, and parses
-    /// the response. Returns either an authorized [`RegisterResponse`] or the
-    /// auth URL the user must visit.
+    /// Serializes a [`RegisterRequest`], sends it over the stream, and
+    /// validates the response into a [`RegisterOutcome`] -- every field
+    /// combination the server can send, including ones the protocol does
+    /// not allow, lands in a variant of that type.
     ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on serialization, I/O, or parse failure.
+    /// Returns [`ControlError`] on serialization, I/O, or a JSON payload
+    /// that fails to parse. A syntactically valid response the protocol
+    /// still rejects -- an explicit rejection, contradictory fields, an
+    /// expired key -- is not an error here; it is a [`RegisterOutcome`]
+    /// variant, because the request itself succeeded.
     pub async fn register(
         &mut self,
         stream: &mut AsyncControlStream,
@@ -330,28 +215,18 @@ impl ControlClient {
 
         let raw = stream.recv_message().await?;
         let resp = parse_register_response(&raw)?;
-
-        if let Some(url) = resp.auth_url.clone() {
-            debug!(
-                target: "dictyon::control",
-                outcome = "needs_auth",
-                "register requires interactive auth",
-            );
-            Ok(RegisterOutcome::NeedsAuth { auth_url: url })
-        } else {
-            debug!(
-                target: "dictyon::control",
-                outcome = "authorized",
-                "register authorized",
-            );
-            Ok(RegisterOutcome::Authorized(resp))
-        }
+        let outcome = classify_register_response(resp);
+        log_register_outcome(&outcome);
+        Ok(outcome)
     }
 
     /// Poll for registration completion after the user has visited the auth URL.
     ///
     /// Sends a new [`RegisterRequest`] with the `followup` field set to the
-    /// URL returned in the initial response, and waits for authorization.
+    /// URL returned in the initial response, and validates the response
+    /// into a [`RegisterOutcome`] via the same rules [`Self::register`]
+    /// uses -- a followup poll can be rejected or come back contradictory
+    /// exactly as the initial request can.
     ///
     /// # Errors
     ///
@@ -360,13 +235,14 @@ impl ControlClient {
         &mut self,
         stream: &mut AsyncControlStream,
         followup_url: &str,
-    ) -> Result<RegisterResponse, ControlError> {
+    ) -> Result<RegisterOutcome, ControlError> {
         debug!(
             target: "dictyon::control",
             followup_url,
             "polling registration followup",
         );
         let req = RegisterRequest {
+            version: CAPABILITY_VERSION.as_u64(),
             node_key: self.node_key.public_key().to_hex(),
             old_node_key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
             auth: None,
@@ -378,7 +254,10 @@ impl ControlClient {
         stream.send_message(&framed).await?;
 
         let raw = stream.recv_message().await?;
-        parse_register_response(&raw)
+        let resp = parse_register_response(&raw)?;
+        let outcome = classify_register_response(resp);
+        log_register_outcome(&outcome);
+        Ok(outcome)
     }
 
     /// Send the initial map request and start streaming map updates.
@@ -438,7 +317,7 @@ impl ControlClient {
     /// Returns [`ControlError::Json`] if serialization fails.
     pub fn build_map_request(&self) -> Result<Vec<u8>, ControlError> {
         let req = MapRequest {
-            version: 68,
+            version: CAPABILITY_VERSION.as_u64(),
             compress: Some("zstd".to_string()),
             node_key: self.node_key.public_key().to_hex(),
             disco_key: self.disco_key.public_key().to_hex(),
@@ -507,6 +386,11 @@ impl ControlClient {
     /// The retained peer list is bounded by [`MAX_PEERS`]: an over-cap list is
     /// truncated and additions past the cap are refused. Updates to peers
     /// already held still apply, since they do not grow the list.
+    ///
+    /// Every `Node`'s key-hex and routing-data fields, and every DNS
+    /// resolver address, are validated before entering the netmap; a peer,
+    /// self-node update, or resolver that fails is dropped rather than
+    /// admitted with unparseable data.
     pub fn apply_map_response(&mut self, resp: MapResponse) {
         if resp.keep_alive == Some(true) {
             return;
@@ -544,102 +428,11 @@ impl ControlClient {
     fn hostinfo(&self) -> Hostinfo {
         let hostname = gethostname();
         Hostinfo {
-            backend_log_id: String::new(),
+            backend_log_id: BackendLogId::new(String::new()),
             os: std::env::consts::OS.to_string(),
             hostname,
             go_version: "dictyon/0.1.0".to_string(),
         }
-    }
-}
-
-fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
-    let Some(peer) = peers.iter_mut().find(|peer| peer.id == change.node_id) else {
-        return;
-    };
-
-    if let Some(region) = change.derp_region.filter(|region| *region > 0) {
-        peer.derp = Some(format!("127.3.3.40:{region}"));
-    }
-
-    if let Some(cap) = change.cap.filter(|cap| *cap > 0) {
-        peer.cap = Some(cap);
-    }
-
-    if let Some(endpoints) = change.endpoints.filter(|endpoints| !endpoints.is_empty()) {
-        peer.endpoints = Some(endpoints);
-    }
-
-    if let Some(key) = change.key {
-        peer.key = key;
-    }
-
-    if let Some(disco_key) = change.disco_key {
-        peer.disco_key = Some(disco_key);
-    }
-
-    if let Some(online) = change.online {
-        peer.online = Some(online);
-    }
-
-    if let Some(last_seen) = change.last_seen {
-        peer.last_seen = Some(last_seen);
-    }
-
-    if let Some(key_expiry) = change.key_expiry {
-        peer.key_expiry = Some(key_expiry);
-    }
-}
-
-/// Truncate a server-supplied peer list to [`MAX_PEERS`].
-///
-/// WHY: shared by both paths that accept a whole list from the server, so the
-/// cap cannot be enforced on one and forgotten on the other.
-fn cap_peers(peers: &mut Vec<Node>) {
-    if peers.len() > MAX_PEERS {
-        let dropped = peers.len() - MAX_PEERS;
-        warn!(
-            cap = MAX_PEERS,
-            dropped, "map response exceeded the peer cap; dropped the excess peers"
-        );
-        peers.truncate(MAX_PEERS);
-    }
-}
-
-/// O(1) membership test over a server-supplied peer-removal list.
-///
-/// WHY: both the peer list and the removal list arrive from the coordination
-/// server, so scanning the removals once per peer is O(n*m) work a server can
-/// demand at will by sending a large delta. Indexing the removals first makes
-/// the sweep linear in the peer count regardless of how many removals arrive.
-struct PeerRemovalIndex<'a> {
-    node_ids: HashSet<i64>,
-    node_keys: HashSet<&'a str>,
-}
-
-impl<'a> PeerRemovalIndex<'a> {
-    /// Index a removal list by the two identifiers it can name a peer with.
-    fn build(removals: &'a [PeerRemoval]) -> Self {
-        let mut node_ids = HashSet::new();
-        let mut node_keys = HashSet::new();
-        for removal in removals {
-            match removal {
-                PeerRemoval::NodeId(node_id) => {
-                    node_ids.insert(*node_id);
-                }
-                PeerRemoval::NodeKey(key) => {
-                    node_keys.insert(key.as_str());
-                }
-            }
-        }
-        Self {
-            node_ids,
-            node_keys,
-        }
-    }
-
-    /// Whether this removal set names `peer`, by node ID or by node key.
-    fn removes(&self, peer: &Node) -> bool {
-        self.node_ids.contains(&peer.id) || self.node_keys.contains(peer.key.as_str())
     }
 }
 
@@ -701,6 +494,44 @@ fn parse_register_response(raw: &[u8]) -> Result<RegisterResponse, ControlError>
     serde_json::from_slice(raw).map_err(|e| ControlError::Json {
         message: e.to_string(),
     })
+}
+
+/// Log a validated [`RegisterOutcome`] at a level matching how much it
+/// deserves operator attention.
+///
+/// WHY: [`RegisterOutcome::Rejected`], `RotateNodeKey`, and `Contradictory`
+/// are exactly the shapes this issue exists to stop silently tolerating, so
+/// they log at `warn` -- a caller polling in a loop should not need to
+/// inspect every outcome to notice the control server is sending something
+/// it shouldn't.
+fn log_register_outcome(outcome: &RegisterOutcome) {
+    match outcome {
+        RegisterOutcome::Authorized(_) => {
+            debug!(target: "dictyon::control", outcome = "authorized", "register authorized");
+        }
+        RegisterOutcome::NeedsAuth(url) => {
+            debug!(
+                target: "dictyon::control",
+                outcome = "needs_auth",
+                auth_url = %url,
+                "register requires interactive auth",
+            );
+        }
+        RegisterOutcome::RotateNodeKey => {
+            warn!(target: "dictyon::control", outcome = "rotate_node_key", "server reports the node key has expired");
+        }
+        RegisterOutcome::Rejected { reason } => {
+            warn!(target: "dictyon::control", outcome = "rejected", reason = %reason, "server rejected the registration request");
+        }
+        RegisterOutcome::Contradictory(fault) => {
+            warn!(
+                target: "dictyon::control",
+                outcome = "contradictory",
+                fault = ?fault,
+                "server sent a registration response the protocol does not allow",
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

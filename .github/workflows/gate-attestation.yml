@@ -41,7 +41,7 @@
 # fleet default (skip) rather than inventing coverage that doesn't exist yet.
 #
 # WHY system_packages is empty: every crate in the workspace (dictyon,
-# hamma-core) and every workspace dependency (snafu, serde, serde_json,
+# mitos) and every workspace dependency (snafu, serde, serde_json,
 # x25519-dalek, zeroize, rand, tokio, tracing, snow, base64, hostname,
 # rustls[ring backend]/tokio-rustls/webpki-roots, zstd, proptest, rcgen,
 # koinon) is pure Rust or vendors its own C sources (zstd-sys) -- no
@@ -85,7 +85,12 @@ permissions:
 
 jobs:
   gate:
-    uses: forkwright/.github/.github/workflows/hybrid-gate.yml@main
+    # WHY pinned to a commit SHA, not @main: a mutable branch ref lets the
+    # remote workflow's behavior change under an already-merged hamma
+    # commit. Refresh via:
+    #   gh api repos/forkwright/.github/commits/main --jq '.sha'
+    # and review the diff at forkwright/.github before bumping.
+    uses: forkwright/.github/.github/workflows/hybrid-gate.yml@df92942bcc41cc7ffd0339b75b2f01e52269d0ef # main
     with:
       # WHY defaults kept as-is: hamma has its own rust-toolchain.toml
       # (channel = "1.88") -- auto-detect applies, no rust_toolchain

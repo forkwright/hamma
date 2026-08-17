@@ -9,6 +9,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -21,8 +22,19 @@ use serde::{Deserialize, Serialize};
 /// (established during the Noise handshake) and either authorizes
 /// immediately or returns an [`RegisterResponse::auth_url`] for
 /// interactive login.
-#[derive(Debug, Serialize)]
+///
+/// NOTE: `node_key`/`old_node_key` are public key hex (see the field-level
+/// `plain-string-secret` ignores below); `auth` is the only sensitive field
+/// and its type ([`AuthInfo`]) already carries a manual, redacting `Debug`
+/// impl that this derive calls into.
+#[derive(Debug, Serialize)] // kanon:ignore RUST/no-debug-derive-on-public-types -- see NOTE
 pub struct RegisterRequest {
+    /// Control-plane capability version. See
+    /// [`crate::capability::CAPABILITY_VERSION`] -- every construction site
+    /// must derive this from that constant, never restate a literal.
+    #[serde(rename = "Version")]
+    pub version: u64,
+
     /// The current node key, serialized as `"nodekey:hex..."`.
     ///
     /// This is the *public* key half of the node keypair (typed hex
@@ -46,7 +58,7 @@ pub struct RegisterRequest {
     #[serde(rename = "Hostinfo")]
     pub hostinfo: Hostinfo,
 
-    /// Follow-up URL for long-polling after the user visits the auth URL.
+    /// Continuation URL for long-polling after the user visits the auth URL.
     /// Set to the `auth_url` from the initial [`RegisterResponse`].
     #[serde(rename = "Followup", skip_serializing_if = "Option::is_none")]
     pub followup: Option<String>,
@@ -59,11 +71,40 @@ pub struct RegisterRequest {
 /// the [`RegisterRequest`] that owns it — a log line, an error context, a panic
 /// payload. The redaction mirrors the one on private key types in
 /// [`crate::keys`].
+///
+/// WARNING: `auth_key` is `Zeroizing<String>`, not `String`, for the same
+/// reason the private key types in [`crate::keys`] zero their backing bytes
+/// on drop: a pre-auth key authorizes unattended device enrollment and is
+/// reusable across sessions, so a heap allocation left holding it after use
+/// is a recoverable credential in a core dump, `/proc/<pid>/mem`, or swap.
+/// `zeroize`'s `serde` feature gives `Zeroizing<String>` the same
+/// `Serialize` impl `String` has, so the wire format is unchanged. The
+/// field stays crate-private; construct through [`AuthInfo::new`] so the
+/// raw key text passes through exactly one allocation, wrapped immediately,
+/// with no separate unwrapped copy left behind at the call site. `new` is
+/// also the only way to reach a non-empty `Auth` object: a bare
+/// `auth_key: None` would serialize as `"Auth":{}` instead of omitting the
+/// field entirely, a wire shape no real caller wants.
 #[derive(Serialize)]
 pub struct AuthInfo {
-    /// Pre-auth key value (e.g. `tskey-auth-...`).
+    /// Pre-auth key value (e.g. `tskey-auth-...`), zeroed on drop.
     #[serde(rename = "AuthKey", skip_serializing_if = "Option::is_none")]
-    pub auth_key: Option<String>,
+    pub(crate) auth_key: Option<Zeroizing<String>>,
+}
+
+impl AuthInfo {
+    /// Wrap a pre-auth key so its backing allocation is zeroed when this
+    /// value (or the [`RegisterRequest`] that owns it) is dropped.
+    ///
+    /// Time: O(n) — copies `auth_key`'s bytes into a fresh allocation, where
+    /// `n` is `auth_key.len()`.
+    /// Space: O(n) — one allocation the size of `auth_key`.
+    #[must_use]
+    pub fn new(auth_key: &str) -> Self {
+        Self {
+            auth_key: Some(Zeroizing::new(auth_key.to_string())),
+        }
+    }
 }
 
 impl fmt::Debug for AuthInfo {
@@ -76,6 +117,29 @@ impl fmt::Debug for AuthInfo {
     }
 }
 
+/// Opaque identifier for correlating backend logs.
+///
+/// The control server treats this as an untyped correlation token: no format
+/// is documented or enforced. The newtype exists to keep it from being mixed
+/// with any other identifier field, not to validate its shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct BackendLogId(String);
+
+impl BackendLogId {
+    /// Wrap a raw backend-log correlation string.
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// Borrow the identifier as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Host information describing this machine to the control server.
 ///
 /// The control server uses this for display in the admin console and
@@ -84,7 +148,7 @@ impl fmt::Debug for AuthInfo {
 pub struct Hostinfo {
     /// Opaque identifier for correlating backend logs.
     #[serde(rename = "BackendLogID")]
-    pub backend_log_id: String,
+    pub backend_log_id: BackendLogId,
 
     /// Operating system name (e.g. `"linux"`, `"darwin"`).
     #[serde(rename = "OS")]
@@ -101,21 +165,36 @@ pub struct Hostinfo {
 }
 
 /// Response from `POST /machine/register`.
+///
+/// A raw wire DTO: it mirrors the control server's JSON fields as closely
+/// as `serde(rename)` allows and carries no validation of its own. Field
+/// *combinations* the protocol does not allow (e.g. `machine_authorized:
+/// true` alongside a non-empty `auth_url`) are representable here on
+/// purpose -- rejecting them is the consuming client's job (`dictyon`'s
+/// `control::classify_register_response`), once every field the server can
+/// set is actually deserialized. This type must not grow validation logic;
+/// see `RUST.md` on wire-DTO exemptions.
 #[derive(Debug, Deserialize)]
 pub struct RegisterResponse {
-    /// URL the user must visit to authorize this machine. `None` if the
-    /// machine is already authorized (e.g. via pre-auth key).
-    #[serde(rename = "AuthURL")]
+    /// URL the user must visit to authorize this machine. `None` or an
+    /// empty string both mean "no URL" -- the reference server marshals a
+    /// zero-value string as `""` rather than omitting the field.
+    #[serde(rename = "AuthURL", default)]
     pub auth_url: Option<String>,
 
     /// Whether the machine is now authorized.
-    #[serde(rename = "MachineAuthorized")]
+    #[serde(rename = "MachineAuthorized", default)]
     pub machine_authorized: bool,
 
-    /// ISO 8601 expiry timestamp for the node key. `None` if the key does
-    /// not expire.
-    #[serde(rename = "NodeKeyExpiry")]
-    pub node_key_expiry: Option<String>,
+    /// Whether the node key has expired and must be rotated before the
+    /// server will consider this node authorized.
+    #[serde(rename = "NodeKeyExpired", default)]
+    pub node_key_expired: bool,
+
+    /// Server-supplied reason the request was rejected. `None` or an empty
+    /// string both mean "no error", for the same reason as `auth_url`.
+    #[serde(rename = "Error", default)]
+    pub error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +205,15 @@ pub struct RegisterResponse {
 ///
 /// When `stream` is true the server holds the connection open and pushes
 /// delta updates.
-#[derive(Debug, Serialize)]
+///
+/// NOTE: `node_key`/`disco_key` are public key hex (see the field-level
+/// `plain-string-secret` ignores below) — nothing here is an unredacted
+/// secret.
+#[derive(Debug, Serialize)] // kanon:ignore RUST/no-debug-derive-on-public-types -- see NOTE
 pub struct MapRequest {
-    /// Protocol capability version.
+    /// Control-plane capability version. See
+    /// [`crate::capability::CAPABILITY_VERSION`] -- every construction site
+    /// must derive this from that constant, never restate a literal.
     #[serde(rename = "Version")]
     pub version: u64,
 
@@ -222,6 +307,7 @@ pub struct MapResponse {
 // renaming would diverge from protocol documentation and break serde mappings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "PeerRemovalWire")]
+#[non_exhaustive]
 pub enum PeerRemoval {
     /// Server-assigned numeric node identifier.
     NodeId(i64),
@@ -265,7 +351,10 @@ impl From<PeerRemovalWire> for PeerRemoval {
 ///
 /// Fields are optional where the control server may omit them (e.g. on
 /// delta updates or for peers with limited visibility).
-#[derive(Debug, Clone, Deserialize, Serialize)]
+///
+/// NOTE: `key`/`machine`/`disco_key` are public key hex, not secrets (see
+/// the field-level `plain-string-secret` ignores below).
+#[derive(Debug, Clone, Deserialize, Serialize)] // kanon:ignore RUST/no-debug-derive-on-public-types -- see NOTE
 pub struct Node {
     /// Server-assigned numeric identifier.
     #[serde(rename = "ID")]
@@ -344,7 +433,10 @@ pub struct Node {
 /// The control server sends these after a full map to avoid resending an
 /// entire [`Node`] when only endpoint, key, capability, or presence metadata
 /// changed.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+///
+/// NOTE: `key`/`disco_key` are public key hex, not secrets (see the
+/// field-level `plain-string-secret` ignores below).
+#[derive(Debug, Clone, Deserialize, Serialize)] // kanon:ignore RUST/no-debug-derive-on-public-types -- see NOTE
 pub struct PeerChange {
     /// Server-assigned numeric identifier of the peer being mutated.
     #[serde(rename = "NodeID")]
@@ -358,7 +450,7 @@ pub struct PeerChange {
     #[serde(rename = "Cap", skip_serializing_if = "Option::is_none")]
     pub cap: Option<u64>,
 
-    /// Opaque capability map until hamma-core has a typed capability model.
+    /// Opaque capability map until mitos has a typed capability model.
     #[serde(rename = "CapMap", skip_serializing_if = "Option::is_none")]
     pub cap_map: Option<serde_json::Value>,
 
@@ -394,7 +486,14 @@ pub struct PeerChange {
 /// DNS configuration received in [`MapResponse`].
 ///
 /// Controls `MagicDNS` behavior, split DNS routes, and upstream resolvers.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+///
+/// NOTE: this mirrors the wire protocol's `DNSConfig` (a server-sent
+/// response type, not a local operator config file — `RUST/config-deny-unknown-fields`
+/// targets the latter). Denying unknown fields here would make dictyon
+/// reject a `MapResponse` outright the day a conforming server adds a new
+/// DNS field, trading forward compatibility for a typo-catcher this type
+/// does not need.
+#[derive(Debug, Clone, Deserialize, Serialize)] // kanon:ignore RUST/config-deny-unknown-fields -- see NOTE
 pub struct DnsConfig {
     /// Upstream DNS resolvers.
     #[serde(rename = "Resolvers", skip_serializing_if = "Option::is_none")]
@@ -433,339 +532,9 @@ pub struct DerpMap {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+//
+// NOTE(RUST/file-too-long): split into a sibling file — types.rs + tests
+// together exceeded the 800-line threshold.
 
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    reason = "tests use expect() for invariants that must hold"
-)]
-mod tests {
-    use super::*;
-
-    /// WHY(#54): the failure this guards is not a wrong value but a refusal to
-    /// decode at all, and it takes the entire `MapResponse` down with it — so
-    /// the assertion that matters is that a peer *without* the key parses,
-    /// alongside its sibling proving a peer *with* the key still round-trips.
-    #[test]
-    fn node_without_addresses_deserializes_to_an_empty_vec() {
-        let json = r#"{"ID":1,"Key":"nodekey:abc","Name":"peer.example.ts.net."}"#;
-
-        let node: Node = serde_json::from_str(json).expect("a node with no Addresses must decode");
-
-        assert!(
-            node.addresses.is_empty(),
-            "absent Addresses must decode as empty, got {:?}",
-            node.addresses
-        );
-        assert_eq!(node.id, 1);
-    }
-
-    #[test]
-    fn node_with_addresses_still_decodes_them() {
-        let json = r#"{"ID":1,"Key":"nodekey:abc","Name":"peer.example.ts.net.","Addresses":["100.64.0.1/32"]}"#;
-
-        let node: Node = serde_json::from_str(json).expect("a node with Addresses must decode");
-
-        assert_eq!(node.addresses, vec!["100.64.0.1/32".to_string()]);
-    }
-
-    #[test]
-    fn register_request_serializes_to_json() {
-        let req = RegisterRequest {
-            node_key: "nodekey:abc123".to_string(),
-            old_node_key: String::new(),
-            auth: Some(AuthInfo {
-                auth_key: Some("tskey-auth-test".to_string()),
-            }),
-            hostinfo: Hostinfo {
-                backend_log_id: "log123".to_string(),
-                os: "linux".to_string(),
-                hostname: "testhost".to_string(),
-                go_version: "dictyon/0.1.0".to_string(),
-            },
-            followup: None,
-        };
-
-        let json = serde_json::to_string(&req).expect("serialization should succeed");
-
-        // Verify PascalCase field names from the Tailscale protocol
-        assert!(json.contains("\"NodeKey\""), "missing NodeKey: {json}");
-        assert!(
-            json.contains("\"OldNodeKey\""),
-            "missing OldNodeKey: {json}"
-        );
-        assert!(
-            json.contains("\"BackendLogID\""),
-            "missing BackendLogID: {json}"
-        );
-        assert!(json.contains("\"OS\""), "missing OS: {json}");
-        assert!(json.contains("\"Hostname\""), "missing Hostname: {json}");
-        assert!(json.contains("\"GoVersion\""), "missing GoVersion: {json}");
-
-        // Verify values round-trip
-        assert!(
-            json.contains("\"nodekey:abc123\""),
-            "NodeKey value wrong: {json}"
-        );
-        assert!(
-            json.contains("\"dictyon/0.1.0\""),
-            "GoVersion value wrong: {json}"
-        );
-
-        // Followup should be omitted when None
-        assert!(
-            !json.contains("\"Followup\""),
-            "Followup should be omitted when None: {json}"
-        );
-    }
-
-    #[test]
-    fn map_response_deserializes_full() {
-        let json = r#"{
-            "Node": {
-                "ID": 12345,
-                "StableID": "node-12345",
-                "Key": "nodekey:self000",
-                "Machine": "mkey:machine000",
-                "Name": "myhost.tail1234.ts.net.",
-                "Cap": 68,
-                "Tags": ["tag:lab"],
-                "Addresses": ["100.64.0.1/32", "fd7a:115c:a1e0::1/128"],
-                "DERP": "127.3.3.40:1",
-                "DiscoKey": "discokey:abc123",
-                "KeyExpiry": "2026-11-01T00:00:00Z",
-                "LastSeen": "2026-05-25T09:00:00Z",
-                "Online": true
-            },
-            "Peers": [
-                {
-                    "ID": 67890,
-                    "Key": "nodekey:peer001",
-                    "Name": "peerhost.tail1234.ts.net.",
-                    "Addresses": ["100.64.0.2/32"],
-                    "AllowedIPs": ["100.64.0.2/32"],
-                    "Endpoints": ["1.2.3.4:41641"],
-                    "DERP": "127.3.3.40:2",
-                    "DiscoKey": "discokey:def456",
-                    "Online": true
-                }
-            ],
-            "DNSConfig": {
-                "Resolvers": [{"Addr": "100.100.100.100"}],
-                "Domains": ["tail1234.ts.net"]
-            },
-            "DERPMap": {
-                "Regions": {"1": {"RegionID": 1, "RegionCode": "nyc"}}
-            }
-        }"#;
-
-        let resp: MapResponse = serde_json::from_str(json).expect("deserialization should succeed");
-
-        let node = resp.node.as_ref().expect("node should be present");
-        assert_eq!(node.id, 12345);
-        assert_eq!(node.stable_id.as_deref(), Some("node-12345"));
-        assert_eq!(node.key, "nodekey:self000");
-        assert_eq!(node.machine.as_deref(), Some("mkey:machine000"));
-        assert_eq!(node.name, "myhost.tail1234.ts.net.");
-        assert_eq!(node.cap, Some(68));
-        assert_eq!(
-            node.tags.as_ref().expect("tags present"),
-            &["tag:lab".to_string()]
-        );
-        assert_eq!(node.addresses.len(), 2);
-        assert_eq!(node.derp.as_deref(), Some("127.3.3.40:1"));
-        assert_eq!(node.key_expiry.as_deref(), Some("2026-11-01T00:00:00Z"));
-        assert_eq!(node.last_seen.as_deref(), Some("2026-05-25T09:00:00Z"));
-        assert_eq!(node.online, Some(true));
-
-        let peers = resp.peers.as_ref().expect("peers should be present");
-        assert_eq!(peers.len(), 1);
-        assert_eq!(peers[0].id, 67890);
-        assert_eq!(peers[0].key, "nodekey:peer001");
-        assert_eq!(
-            peers[0].endpoints.as_ref().expect("endpoints present"),
-            &["1.2.3.4:41641"]
-        );
-
-        let dns = resp
-            .dns_config
-            .as_ref()
-            .expect("dns_config should be present");
-        let resolvers = dns.resolvers.as_ref().expect("resolvers present");
-        assert_eq!(resolvers[0].addr, "100.100.100.100");
-        let domains = dns.domains.as_ref().expect("domains present");
-        assert_eq!(domains[0], "tail1234.ts.net");
-
-        assert!(resp.derp_map.is_some());
-        assert!(resp.keep_alive.is_none());
-    }
-
-    #[test]
-    fn map_response_deserializes_keepalive() {
-        let json = r#"{"KeepAlive": true}"#;
-        let resp: MapResponse = serde_json::from_str(json).expect("keepalive should parse");
-
-        assert_eq!(resp.keep_alive, Some(true));
-        assert!(resp.node.is_none());
-        assert!(resp.peers.is_none());
-        assert!(resp.peers_changed.is_none());
-        assert!(resp.peers_changed_patch.is_none());
-        assert!(resp.peers_removed.is_none());
-        assert!(resp.dns_config.is_none());
-        assert!(resp.derp_map.is_none());
-    }
-
-    #[test]
-    fn node_deserializes_with_optional_fields() {
-        let json = r#"{
-            "ID": 1,
-            "Key": "nodekey:minimal",
-            "Name": "bare.example.ts.net.",
-            "Addresses": ["100.64.0.99/32"]
-        }"#;
-
-        let node: Node = serde_json::from_str(json).expect("minimal node should parse");
-
-        assert_eq!(node.id, 1);
-        assert_eq!(node.key, "nodekey:minimal");
-        assert_eq!(node.name, "bare.example.ts.net.");
-        assert_eq!(node.addresses, vec!["100.64.0.99/32"]);
-        assert!(node.stable_id.is_none());
-        assert!(node.machine.is_none());
-        assert!(node.cap.is_none());
-        assert!(node.tags.is_none());
-        assert!(node.allowed_ips.is_none());
-        assert!(node.endpoints.is_none());
-        assert!(node.derp.is_none());
-        assert!(node.disco_key.is_none());
-        assert!(node.key_expiry.is_none());
-        assert!(node.last_seen.is_none());
-        assert!(node.online.is_none());
-    }
-
-    #[test]
-    fn map_response_deserializes_peer_changed_patch() {
-        let json = r#"{
-            "PeersChangedPatch": [
-                {
-                    "NodeID": 67890,
-                    "DERPRegion": 2,
-                    "Endpoints": ["1.2.3.4:41641"],
-                    "Key": "nodekey:peer001",
-                    "DiscoKey": "discokey:def456",
-                    "Online": true,
-                    "LastSeen": "2026-05-25T09:00:00Z",
-                    "KeyExpiry": "2026-11-01T00:00:00Z",
-                    "Cap": 68,
-                    "CapMap": {"https://tailscale.com/cap/is-admin": null}
-                }
-            ]
-        }"#;
-
-        let resp: MapResponse = serde_json::from_str(json).expect("patch frame should parse");
-        let patch = resp
-            .peers_changed_patch
-            .as_ref()
-            .expect("patch should be present");
-
-        assert_eq!(patch.len(), 1);
-        assert_eq!(patch[0].node_id, 67890);
-        assert_eq!(patch[0].derp_region, Some(2));
-        assert_eq!(
-            patch[0].endpoints.as_ref().expect("endpoints present")[0],
-            "1.2.3.4:41641"
-        );
-        assert_eq!(patch[0].key.as_deref(), Some("nodekey:peer001"));
-        assert_eq!(patch[0].disco_key.as_deref(), Some("discokey:def456"));
-        assert_eq!(patch[0].online, Some(true));
-        assert_eq!(patch[0].last_seen.as_deref(), Some("2026-05-25T09:00:00Z"));
-        assert_eq!(patch[0].key_expiry.as_deref(), Some("2026-11-01T00:00:00Z"));
-        assert_eq!(patch[0].cap, Some(68));
-        assert!(patch[0].cap_map.is_some());
-    }
-
-    #[test]
-    fn map_response_deserializes_peer_removals_by_node_id_and_key() {
-        let json = r#"{
-            "PeersRemoved": [
-                67890,
-                {"NodeID": 67891},
-                "nodekey:legacy"
-            ]
-        }"#;
-
-        let resp: MapResponse = serde_json::from_str(json).expect("removal frame should parse");
-        let removals = resp.peers_removed.expect("removals should be present");
-
-        assert_eq!(removals.len(), 3);
-        assert_eq!(removals[0], PeerRemoval::NodeId(67890));
-        assert_eq!(removals[1], PeerRemoval::NodeId(67891));
-        assert_eq!(
-            removals[2],
-            PeerRemoval::NodeKey("nodekey:legacy".to_string())
-        );
-    }
-    /// WHY: a derived `Debug` on `AuthInfo` printed the pre-auth key verbatim,
-    /// so any `{:?}` of a `RegisterRequest` leaked a credential into logs. This
-    /// fails if the manual impl is dropped or a derive is reinstated.
-    #[test]
-    fn auth_info_debug_redacts_the_pre_auth_key() {
-        let info = AuthInfo {
-            auth_key: Some("tskey-auth-kSeCrEtValue".to_string()),
-        };
-
-        let rendered = format!("{info:?}");
-
-        assert!(
-            !rendered.contains("tskey-auth-kSeCrEtValue"),
-            "Debug leaked the pre-auth key: {rendered}"
-        );
-        assert!(
-            rendered.contains("REDACTED"),
-            "Debug should mark the field redacted: {rendered}"
-        );
-    }
-
-    /// The leak path that matters is transitive — nothing formats a bare
-    /// `AuthInfo`, but `RegisterRequest` derives `Debug` and owns one.
-    #[test]
-    fn register_request_debug_does_not_leak_the_nested_pre_auth_key() {
-        let request = RegisterRequest {
-            node_key: "nodekey:abc".to_string(),
-            old_node_key: String::new(),
-            auth: Some(AuthInfo {
-                auth_key: Some("tskey-auth-kSeCrEtValue".to_string()),
-            }),
-            hostinfo: Hostinfo {
-                backend_log_id: "log-id".to_string(),
-                os: "linux".to_string(),
-                hostname: "test-host".to_string(),
-                go_version: String::new(),
-            },
-            followup: None,
-        };
-
-        let rendered = format!("{request:?}");
-
-        assert!(
-            !rendered.contains("tskey-auth-kSeCrEtValue"),
-            "RegisterRequest Debug leaked the nested pre-auth key: {rendered}"
-        );
-    }
-
-    /// An absent key must stay distinguishable from a redacted one, or the
-    /// redaction destroys the only thing the field was useful for in a log.
-    #[test]
-    fn auth_info_debug_distinguishes_absent_from_redacted() {
-        let absent = format!("{:?}", AuthInfo { auth_key: None });
-
-        assert!(
-            absent.contains("None"),
-            "an absent key should read as None: {absent}"
-        );
-        assert!(
-            !absent.contains("REDACTED"),
-            "an absent key must not claim to be redacted: {absent}"
-        );
-    }
-}
+mod tests;

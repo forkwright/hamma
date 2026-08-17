@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use base64::Engine;
-use hamma_core::keys::MachinePrivate;
+use mitos::keys::MachinePrivate;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use snow::Builder;
@@ -23,7 +23,23 @@ const MSG_TYPE_INITIATION: u8 = 0x01;
 const MSG_TYPE_RESPONSE: u8 = 0x02;
 const MSG_TYPE_TRANSPORT: u8 = 0x04;
 const NOISE_PARAMS: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
-const NOISE_PROLOGUE: &[u8] = b"Tailscale Control Protocol v1";
+
+/// Prologue this independently-implemented mock server mixes into its Noise
+/// responder.
+///
+/// WHY not a `const`: the numeric half must come from
+/// `mitos::capability::CAPABILITY_VERSION` -- dictyon's one truthful source
+/// -- rather than a redeclared literal. A mock server that hardcodes its own
+/// version number stops being an independent oracle: it repeats whatever the
+/// client believes rather than checking it, and the two can drift apart
+/// silently.
+fn noise_prologue() -> Vec<u8> {
+    format!(
+        "Tailscale Control Protocol v{}",
+        mitos::capability::CAPABILITY_VERSION
+    )
+    .into_bytes()
+}
 
 // ---------------------------------------------------------------------------
 // Test TLS helpers
@@ -101,7 +117,14 @@ fn extract_header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
 /// Parse the Noise initiation message from the base64-encoded
 /// `X-Tailscale-Handshake` header value.
 ///
-/// Wire format: `[2B version LE][1B type=0x01][2B payload_len BE][noise_msg]`
+/// Wire format: `[2B version BE][1B type=0x01][2B payload_len BE][noise_msg]`
+///
+/// WHY the version bytes are checked here, not just decoded past: this mock
+/// server is the oracle a client-side unit test cannot be -- an assertion
+/// here catches a client that encodes the version field in the wrong byte
+/// order even though the client's own decoder would happily read its own
+/// mis-encoding back (both sides wrong the same way). Big-endian and
+/// against `CAPABILITY_VERSION`, not a value this file redeclares.
 #[expect(
     clippy::expect_used,
     reason = "integration test helper should fail immediately on malformed mock handshakes"
@@ -111,6 +134,11 @@ fn decode_handshake_header(b64: &str) -> Vec<u8> {
         .decode(b64)
         .expect("X-Tailscale-Handshake should be valid base64");
     assert!(framed.len() >= 5, "handshake too short");
+    assert_eq!(
+        [framed[0], framed[1]],
+        mitos::capability::CAPABILITY_VERSION.to_be_bytes(),
+        "initiation version must be CAPABILITY_VERSION, big-endian"
+    );
     assert_eq!(framed[2], MSG_TYPE_INITIATION, "wrong message type");
     let noise_len = u16::from_be_bytes([framed[3], framed[4]]) as usize;
     framed[5..5 + noise_len].to_vec()
@@ -217,9 +245,19 @@ async fn handle_key_request(
 ) {
     let headers = read_http_headers(stream).await;
     let header_str = std::str::from_utf8(&headers).expect("headers should be UTF-8");
+    // WHY the exact query string, not just a `/key` prefix: `key_path()` is
+    // private to `dictyon::wire`, so this is the only vantage point outside
+    // that module that can observe the real bytes the client puts on the
+    // wire -- catching a hardcoded literal reintroduced at that one call
+    // site even though every other consumer still derives from
+    // CAPABILITY_VERSION.
+    let expected_request_line = format!(
+        "GET /key?v={} HTTP/1.1",
+        mitos::capability::CAPABILITY_VERSION
+    );
     assert!(
-        header_str.starts_with("GET /key"),
-        "expected GET /key, got: {header_str}"
+        header_str.starts_with(&expected_request_line),
+        "expected {expected_request_line:?}, got: {header_str}"
     );
 
     let pub_hex = keys.public_hex();
@@ -265,7 +303,7 @@ async fn handle_noise_upgrade(
     let mut responder = Builder::new(params)
         .local_private_key(&keys.noise_private)
         .expect("set local key")
-        .prologue(NOISE_PROLOGUE)
+        .prologue(&noise_prologue())
         .expect("set prologue")
         .build_responder()
         .expect("build responder");
@@ -441,8 +479,8 @@ async fn register_returns_authorized_with_preauth_key() {
     });
 
     let machine_key = MachinePrivate::generate();
-    let node_key = hamma_core::keys::NodePrivate::generate();
-    let disco_key = hamma_core::keys::DiscoPrivate::generate();
+    let node_key = mitos::keys::NodePrivate::generate();
+    let disco_key = mitos::keys::DiscoPrivate::generate();
 
     let config = dictyon::wire::ControlConfig::new(
         format!("https://127.0.0.1:{}", addr.port()),
@@ -470,6 +508,11 @@ async fn register_returns_authorized_with_preauth_key() {
 
     server.await.expect("mock server should not panic");
 }
+
+// WHY: split into a sibling file (see its own doc comment) because this
+// test plus the rest of the file exceeded the `RUST/file-too-long`
+// threshold. `use super::*;` there reaches every helper defined below.
+mod register_flow;
 
 #[tokio::test]
 #[expect(
@@ -501,8 +544,8 @@ async fn map_stream_receives_compressed_full_map_after_register() {
     });
 
     let machine_key = MachinePrivate::generate();
-    let node_key = hamma_core::keys::NodePrivate::generate();
-    let disco_key = hamma_core::keys::DiscoPrivate::generate();
+    let node_key = mitos::keys::NodePrivate::generate();
+    let disco_key = mitos::keys::DiscoPrivate::generate();
 
     let config = dictyon::wire::ControlConfig::new(
         format!("https://127.0.0.1:{}", addr.port()),
@@ -588,7 +631,7 @@ fn make_dummy_transport() -> (dictyon::transport::ControlConnection, ()) {
         .expect("local_private_key")
         .remote_public_key(server_pub.as_bytes())
         .expect("remote_public_key")
-        .prologue(NOISE_PROLOGUE)
+        .prologue(&noise_prologue())
         .expect("prologue")
         .build_initiator()
         .expect("build_initiator");
@@ -597,7 +640,7 @@ fn make_dummy_transport() -> (dictyon::transport::ControlConnection, ()) {
     let mut responder = Builder::new(params2)
         .local_private_key(server_key.as_bytes())
         .expect("local_private_key")
-        .prologue(NOISE_PROLOGUE)
+        .prologue(&noise_prologue())
         .expect("prologue")
         .build_responder()
         .expect("build_responder");
@@ -690,11 +733,15 @@ fn frame_control_payload(payload: &[u8]) -> Vec<u8> {
     frame
 }
 
+// WHY(#55): `Key` must be valid `NodePublic` hex -- `Netmap::from_full_response`
+// now validates it and would otherwise silently fall back to a zero-value
+// self node / drop the peer, turning this fixture's own assertions into
+// false negatives for what they claim to exercise.
 const FULL_MAP_RESPONSE_JSON: &[u8] = br#"{
     "Node": {
         "ID": 100,
         "StableID": "node-self",
-        "Key": "nodekey:self",
+        "Key": "nodekey:0000000000000000000000000000000000000000000000000000000000000064",
         "Name": "self.tail.test.",
         "Addresses": ["100.64.0.1/32"],
         "Online": true
@@ -702,7 +749,7 @@ const FULL_MAP_RESPONSE_JSON: &[u8] = br#"{
     "Peers": [
         {
             "ID": 200,
-            "Key": "nodekey:peer",
+            "Key": "nodekey:00000000000000000000000000000000000000000000000000000000000000c8",
             "Name": "peer.tail.test.",
             "Addresses": ["100.64.0.2/32"],
             "Endpoints": ["203.0.113.10:41641"],

@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/dictyon",
-    "crates/hamma-core",
+    "crates/mitos",
 ]
 
 [workspace.package]
@@ -63,16 +63,17 @@ hostname = "0.4"
 # Noise protocol
 snow = "0.10"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
-zeroize = { version = "1", features = ["derive"] }
+zeroize = { version = "1", features = ["derive", "serde"] }
 rand = "0.10"
 base64 = "0.22"
 zstd = "0.13"
 
 # Testing
 proptest = "1"
+toml = "0.8"
 
 # Local workspace crates
-hamma-core = { path = "crates/hamma-core", version = "0.2.0" }
+mitos = { path = "crates/mitos", version = "0.2.0" }
 
 # Expanded forms (inline table exceeded 80 columns; MSRV 1.85 predates TOML 1.1
 # multi-line inline tables, so use [workspace.dependencies.X] blocks instead).

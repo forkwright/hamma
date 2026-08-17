@@ -13,10 +13,12 @@ use dictyon::control::{ControlClient, ControlError, RegisterOutcome};
 use dictyon::noise::{NoiseError, NoiseHandshake};
 use dictyon::transport::{ControlConnection, TransportError};
 use dictyon::wire::{AsyncControlStream, ControlConfig, WireError, connect};
-use hamma_core::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use koinon::telemetry;
+use mitos::capability::CAPABILITY_VERSION;
+use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
+use zeroize::Zeroizing;
 
 const CONTROL_URL: &str = "https://controlplane.tailscale.com";
 
@@ -89,8 +91,13 @@ async fn main() -> Result<(), ExampleError> {
 }
 
 async fn run() -> Result<(), ExampleError> {
+    // WHY: `std::env::var` is wrapped in `Zeroizing` in the same statement
+    // that allocates it, mirroring `AuthInfo::new` (mitos/src/types/mod.rs)
+    // — no unwrapped copy of the raw secret is ever bound to a separate
+    // variable, so there is nothing left for a core dump or `/proc/<pid>/mem`
+    // read to recover once this value is dropped.
     let auth_key = match std::env::var("TS_AUTHKEY") {
-        Ok(value) => Some(value),
+        Ok(value) => Some(Zeroizing::new(value)),
         Err(std::env::VarError::NotPresent) => {
             warn!("TS_AUTHKEY not set - server will require interactive auth");
             None
@@ -123,7 +130,17 @@ async fn run() -> Result<(), ExampleError> {
         disco_key,
     );
 
-    register_node(&mut client, &mut stream, auth_key.as_deref()).await?;
+    register_node(
+        &mut client,
+        &mut stream,
+        auth_key.as_deref().map(String::as_str),
+    )
+    .await?;
+    // WHY: auth_key is only needed for registration; stream_map below runs
+    // until interrupted, so dropping here — rather than letting it live to
+    // the end of `run` — bounds how long the zeroizing allocation backing
+    // this reusable, session-independent secret stays resident.
+    drop(auth_key);
     stream_map(&mut client, &mut stream).await?;
     Ok(())
 }
@@ -135,24 +152,48 @@ async fn register_node(
 ) -> Result<(), ExampleError> {
     info!("registering…");
     match client.register(stream, auth_key).await? {
-        RegisterOutcome::Authorized(resp) => {
-            info!(
-                authorized = resp.machine_authorized,
-                expiry = ?resp.node_key_expiry,
-                "node authorized"
-            );
+        RegisterOutcome::NeedsAuth(url) => {
+            info!("visit to authorize: {url}");
+            let followup = client.poll_registration(stream, url.as_str()).await?;
+            report_register_outcome(followup);
         }
-        RegisterOutcome::NeedsAuth { auth_url } => {
-            info!("visit to authorize: {auth_url}");
-            let resp = client.poll_registration(stream, &auth_url).await?;
-            info!(authorized = resp.machine_authorized, "auth complete");
+        outcome => report_register_outcome(outcome),
+    }
+    Ok(())
+}
+
+/// Log what a terminal [`RegisterOutcome`] means for this example run.
+///
+/// [`RegisterOutcome::NeedsAuth`] is handled by the caller (`register_node`)
+/// before it reaches here: a real caller polls again via
+/// [`ControlClient::poll_registration`] once the user has visited the URL,
+/// so this example performs that round trip rather than only logging the
+/// URL. A [`RegisterOutcome::NeedsAuth`] can still arrive here as the
+/// *followup* poll's own result (the server has not observed the user
+/// complete auth yet); a real caller would retry registration with a fresh
+/// node key after `RotateNodeKey`.
+fn report_register_outcome(outcome: RegisterOutcome) {
+    match outcome {
+        RegisterOutcome::Authorized(resp) => {
+            info!(authorized = resp.machine_authorized, "node authorized");
+        }
+        RegisterOutcome::NeedsAuth(url) => {
+            info!("visit to authorize: {url}");
+        }
+        RegisterOutcome::RotateNodeKey => {
+            warn!("server reports the node key has expired; a fresh key is required");
+        }
+        RegisterOutcome::Rejected { reason } => {
+            warn!(reason, "server rejected the registration request");
+        }
+        RegisterOutcome::Contradictory(fault) => {
+            warn!(?fault, "server sent a response the protocol does not allow");
         }
         // RegisterOutcome is #[non_exhaustive]; cover future variants.
         _ => {
             warn!("unknown register outcome variant; treating as unsupported");
         }
     }
-    Ok(())
 }
 
 async fn stream_map(
@@ -195,13 +236,16 @@ fn build_placeholder_connection() -> Result<ControlConnection, ExampleError> {
             .map_err(|e: snow::Error| ExampleError::PlaceholderHandshake {
                 message: format!("parse noise params: {e}"),
             })?;
-    let prologue = b"Tailscale Control Protocol v1";
+    // WHY derived, not a literal: this responder must mix the identical
+    // prologue the real NoiseHandshake used to build init_msg, or the Noise
+    // handshake hash diverges and read_message below fails authentication.
+    let prologue = format!("Tailscale Control Protocol v{CAPABILITY_VERSION}").into_bytes();
     let mut responder = snow::Builder::new(params)
         .local_private_key(server_key.as_bytes())
         .context(PlaceholderHandshakeFromSnowSnafu {
             stage: "local_private_key",
         })?
-        .prologue(prologue)
+        .prologue(&prologue)
         .context(PlaceholderHandshakeFromSnowSnafu { stage: "prologue" })?
         .build_responder()
         .context(PlaceholderHandshakeFromSnowSnafu {

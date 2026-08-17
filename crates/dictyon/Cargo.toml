@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-hamma-core = { workspace = true }
+mitos = { workspace = true }
 snafu = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -25,6 +25,7 @@ zstd = { workspace = true }
 proptest = { workspace = true }
 rcgen = "0.13"
 koinon = { workspace = true }
+zeroize = { workspace = true }
 
 [lints]
 workspace = true

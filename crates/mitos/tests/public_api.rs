@@ -1,4 +1,4 @@
-//! Integration smoke tests for the `hamma-core` public API.
+//! Integration smoke tests for the `mitos` public API.
 //!
 //! Unit tests live alongside the implementation in `src/keys.rs` and
 //! `src/types.rs`. These integration tests exercise the crate from an
@@ -11,12 +11,13 @@
     reason = "tests use expect() for invariants that must hold"
 )]
 
-use hamma_core::keys::{
+use mitos::CAPABILITY_VERSION;
+use mitos::keys::{
     DiscoPrivate, DiscoPublic, KeyError, MachinePrivate, MachinePublic, NodePrivate, NodePublic,
 };
-use hamma_core::types::{
-    AuthInfo, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse, Node, PeerChange,
-    PeerRemoval, RegisterRequest, RegisterResponse,
+use mitos::types::{
+    AuthInfo, BackendLogId, DerpMap, DnsConfig, DnsResolver, Hostinfo, MapRequest, MapResponse,
+    Node, PeerChange, PeerRemoval, RegisterRequest, RegisterResponse,
 };
 
 #[test]
@@ -58,7 +59,7 @@ fn machine_public_from_hex_rejects_wrong_length() {
 #[test]
 fn map_request_round_trips_through_json() {
     let req = MapRequest {
-        version: 68,
+        version: CAPABILITY_VERSION.as_u64(),
         compress: Some("zstd".to_string()),
         node_key: "nodekey:abc".to_string(),
         disco_key: "discokey:def".to_string(),
@@ -66,7 +67,7 @@ fn map_request_round_trips_through_json() {
         stream: true,
         omit_peers: false,
         hostinfo: Hostinfo {
-            backend_log_id: String::new(),
+            backend_log_id: BackendLogId::new(""),
             os: "linux".to_string(),
             hostname: "host".to_string(),
             go_version: "dictyon/0.1.0".to_string(),
@@ -74,20 +75,19 @@ fn map_request_round_trips_through_json() {
     };
     let json = serde_json::to_string(&req).expect("MapRequest serializes");
     assert!(json.contains("\"NodeKey\":\"nodekey:abc\""));
-    assert!(json.contains("\"Version\":68"));
+    assert!(json.contains(&format!("\"Version\":{CAPABILITY_VERSION}")));
     assert!(json.contains("\"Compress\":\"zstd\""));
 }
 
 #[test]
 fn register_request_omits_none_fields() {
     let req = RegisterRequest {
+        version: CAPABILITY_VERSION.as_u64(),
         node_key: "nodekey:abc".to_string(),
         old_node_key: String::new(),
-        auth: Some(AuthInfo {
-            auth_key: Some("tskey-auth-test".to_string()),
-        }),
+        auth: Some(AuthInfo::new("tskey-auth-test")),
         hostinfo: Hostinfo {
-            backend_log_id: "log".to_string(),
+            backend_log_id: BackendLogId::new("log"),
             os: "linux".to_string(),
             hostname: "h".to_string(),
             go_version: "dictyon/0.1.0".to_string(),
@@ -102,6 +102,17 @@ fn register_request_omits_none_fields() {
     assert!(
         json.contains("\"Auth\""),
         "Some Auth should be present: {json}"
+    );
+    // `"Auth"` alone would still pass for a nested AuthKey that were
+    // missing, empty, or wrong-shaped ("Auth":{} also contains "Auth") —
+    // pin the exact nested value so this test can actually fail on that.
+    assert!(
+        json.contains("\"AuthKey\":\"tskey-auth-test\""),
+        "AuthKey value should be present under Auth: {json}"
+    );
+    assert!(
+        json.contains(&format!("\"Version\":{CAPABILITY_VERSION}")),
+        "RegisterRequest.Version should be present: {json}"
     );
 }
 
@@ -200,5 +211,36 @@ fn register_response_parses_auth_url_variant() {
         Some("https://login.tailscale.com/a/abc")
     );
     assert!(!resp.machine_authorized);
-    assert!(resp.node_key_expiry.is_none());
+    assert!(!resp.node_key_expired);
+    assert!(resp.error.is_none());
+}
+
+/// The reference control server's full `RegisterResponse` shape includes
+/// `Error` and `NodeKeyExpired` alongside `MachineAuthorized` and
+/// `AuthURL` -- all four must reach the public API, not just the two this
+/// crate originally modeled.
+#[test]
+fn register_response_parses_error_and_node_key_expired() {
+    let json = r#"{
+        "Error": "invalid auth key",
+        "MachineAuthorized": false,
+        "NodeKeyExpired": true
+    }"#;
+    let resp: RegisterResponse = serde_json::from_str(json).expect("full variant parses");
+    assert_eq!(resp.error.as_deref(), Some("invalid auth key"));
+    assert!(resp.node_key_expired);
+    assert!(!resp.machine_authorized);
+    assert!(resp.auth_url.is_none());
+}
+
+/// The reference server marshals its zero values (`""`, `false`) rather
+/// than omitting fields; a response naming none of them must still parse,
+/// with every field at its absent/false default.
+#[test]
+fn register_response_missing_fields_default_to_absent() {
+    let resp: RegisterResponse = serde_json::from_str("{}").expect("empty object parses");
+    assert!(resp.auth_url.is_none());
+    assert!(!resp.machine_authorized);
+    assert!(!resp.node_key_expired);
+    assert!(resp.error.is_none());
 }

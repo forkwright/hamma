@@ -223,7 +223,8 @@ impl ControlConnection {
     reason = "tests use expect() for invariants that must hold"
 )]
 mod tests {
-    use hamma_core::keys::MachinePrivate;
+    use mitos::capability::CAPABILITY_VERSION;
+    use mitos::keys::MachinePrivate;
 
     use super::*;
 
@@ -304,14 +305,15 @@ mod tests {
         let params: snow::params::NoiseParams = "Noise_IK_25519_ChaChaPoly_BLAKE2s"
             .parse()
             .expect("params should parse");
-        let prologue_bytes = "Tailscale Control Protocol v1".as_bytes();
+        let prologue_bytes =
+            format!("Tailscale Control Protocol v{CAPABILITY_VERSION}").into_bytes();
 
         let mut initiator = snow::Builder::new(params.clone())
             .local_private_key(machine_key.as_bytes())
             .expect("set key")
             .remote_public_key(server_pub.as_bytes())
             .expect("set remote key")
-            .prologue(prologue_bytes)
+            .prologue(&prologue_bytes)
             .expect("set prologue")
             .build_initiator()
             .expect("build initiator");
@@ -323,7 +325,7 @@ mod tests {
         let mut responder = snow::Builder::new(params2)
             .local_private_key(server_key.as_bytes())
             .expect("set key")
-            .prologue(prologue_bytes)
+            .prologue(&prologue_bytes)
             .expect("set prologue")
             .build_responder()
             .expect("build responder");
