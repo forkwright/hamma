@@ -65,7 +65,7 @@ snow = "0.10"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zeroize = { version = "1", features = ["derive", "serde"] }
 rand = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 zstd = "0.13"
 
 # Testing
