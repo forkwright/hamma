@@ -56,7 +56,7 @@ fn make_test_tls_pair() -> (rustls::ServerConfig, rustls::ClientConfig) {
         .expect("generate_simple_self_signed should succeed");
 
     let cert_der: CertificateDer<'static> = CertificateDer::from(cert_key.cert.der().to_vec());
-    let key_der = PrivatePkcs8KeyDer::from(cert_key.key_pair.serialize_der());
+    let key_der = PrivatePkcs8KeyDer::from(cert_key.signing_key.serialize_der());
 
     let server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()

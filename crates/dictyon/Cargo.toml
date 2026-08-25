@@ -23,7 +23,7 @@ zstd = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-rcgen = "0.13"
+rcgen = "0.14"
 koinon = { workspace = true }
 zeroize = { workspace = true }
 
