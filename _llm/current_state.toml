@@ -4,23 +4,43 @@ repo = "forkwright/hamma"
 generated = false
 source_docs = [
   "README.md",
-  "<canonical-state-doc>/STATE.md",
+  "https://github.com/forkwright/kanon/blob/main/projects/hamma/STATE.md",
 ]
 
 [state]
-summary = "Hamma is pre-alpha, actively implementing the dictyon client against tailscale.com before the sovereign histos server."
-current_phase = "Phase A: dictyon client implementation; milestones 1-3 complete; milestone 4 WireGuard data plane next."
-updated = "2026-05-01"
+summary = "Hamma is pre-alpha, actively implementing the dictyon client against tailscale.com before the sovereign histos server. The workspace is two crates today: mitos (shared types, renamed from hamma-core) and dictyon (peer client)."
+current_phase = "Phase A: dictyon client implementation. Noise handshake, control protocol, TCP/TLS registration, and map-streaming are landed; the WireGuard data plane via boringtun is the next milestone and has not started."
+updated = "2026-08-26"
 
 [[recent]]
-date = "2026-04-22"
-item = "NOTICE canonicalized and forge sync timer active."
+date = "2026-08-08"
+item = "hamma-core crate renamed to mitos (#86); dictyon's wire.rs split into wire/mod.rs."
 
 [[recent]]
-date = "2026-04-13"
-item = "Milestone 3 shipped TCP/TLS connection, registration flow, and streaming map loop."
+date = "2026-07-28"
+item = "v0.2.0 changelog cut via release-please PR #58. The tag and GitHub Release never completed (release-please-config.json set component/package-name fields no other fleet repo carries, which collided with release-please's own untagged-branch matching); fixed by removing those fields."
 
 [[open_threads]]
 name = "WireGuard data plane"
 issue = 0
-status = "Next milestone: boringtun-backed peer sessions."
+status = "Next milestone: boringtun-backed peer sessions. No implementation code yet (dependency-only)."
+
+[[open_threads]]
+name = "HTTP/2 over Noise"
+issue = 65
+status = "Noise records are currently treated as control RPC boundaries directly; open."
+
+[[open_threads]]
+name = "ACL/CapMap policy state"
+issue = 67
+status = "Authoritative ACL policy state needed before advertising or activating the data plane; open."
+
+[[open_threads]]
+name = "Koinon dependency pin"
+issue = 61
+status = "Koinon is tracked at main instead of a released tag; open."
+
+[[open_threads]]
+name = "Producer guidance vs interoperability gates"
+issue = 118
+status = "Reconcile producer guidance with the Phase A interoperability gates; open."

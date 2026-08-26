@@ -4,7 +4,7 @@ repo = "forkwright/hamma"
 generated = false
 source_docs = [
   "README.md",
-  "<canonical-state-doc>/STATE.md",
+  "https://github.com/forkwright/kanon/blob/main/projects/hamma/STATE.md",
 ]
 
 [glossary]

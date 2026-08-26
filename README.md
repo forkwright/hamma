@@ -8,7 +8,7 @@ A clean-room Rust implementation of a Tailscale-compatible mesh networking stack
 
 **Pre-alpha.** No releases yet and no stable API. Phase A is active: the `dictyon` peer client has landed the Noise handshake, control protocol types, TCP/TLS registration, and map-streaming loop. The next implementation milestone is the WireGuard data plane via `boringtun`.
 
-The project is not production-ready. Wire compatibility with real Tailscale traffic is still being validated, and the current audit backlog tracks known gaps in map deltas, zstd framing, node-key expiry handling, tracing, and map-stream integration coverage.
+The project is not production-ready. Wire compatibility with real Tailscale traffic is still being validated. See the [issue tracker](https://github.com/forkwright/hamma/issues) for the current gap list.
 
 ## What this is
 
