@@ -1,5 +1,5 @@
 <!--
-scope: hamma repo conventions (Tailscale-compatible mesh networking in pure Rust: dictyon, mitos, future histos)
+scope: hamma repo conventions (pure-Rust mesh networking targeting Tailscale compatibility: dictyon, mitos, future histos)
 defers_to: ~/menos-ops/CLAUDE.md for machine topology; ~/.claude/CLAUDE.md for operator principles; kanon standards for universal engineering policy
 tightens: no-unsafe/no-unwrap discipline, boringtun as the only audited unsafe boundary
 -->
@@ -10,7 +10,7 @@ Project orientation for AI coding agents working on hamma.
 
 ## What hamma is
 
-A clean-room Rust Tailscale-compatible mesh networking stack. Phase A builds the `dictyon` peer
+A clean-room Rust mesh networking stack targeting Tailscale compatibility. Phase A builds the `dictyon` peer
 client as the networking layer for the forkwright ecosystem and as an OSS contribution to the
 Rust networking ecosystem.
 
@@ -88,6 +88,7 @@ A self-paired registration and map-stream prototype must pass independent contro
 
 While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
 The public contract, not private planning prose, owns this producer order.
+Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges.
 
 Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
 <!-- phase-a:generated:end -->

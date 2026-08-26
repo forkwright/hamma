@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 ENTRYPOINT = ROOT / ".github/workflows/gate-attestation.yml"
 REUSABLE = ROOT / ".github/workflows/phase-a-gate.yml"
+FORGE_PIPELINE = ROOT / ".kanon-ci.toml"
 
 
 def job_block(document: str, job_id: str) -> str:
@@ -28,6 +29,7 @@ class PhaseAWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
         self.reusable = REUSABLE.read_text(encoding="utf-8")
+        self.forge_pipeline = FORGE_PIPELINE.read_text(encoding="utf-8")
 
     def test_required_context_routes_through_local_wrapper(self) -> None:
         gate = job_block(self.entrypoint, "gate")
@@ -46,6 +48,14 @@ class PhaseAWorkflowTests(unittest.TestCase):
             "tools/test_phase_a_workflow.py",
             contract,
         )
+
+    def test_receipt_boundary_uses_stable_event_and_forge_revisions(self) -> None:
+        contract = job_block(self.reusable, "phase-a-contract")
+        self.assertIn("HAMMA_PRODUCER_BOUNDARY:", contract)
+        self.assertIn("github.event.pull_request.base.sha", contract)
+        self.assertIn("github.sha", contract)
+        self.assertIn("HAMMA_PRODUCER_BOUNDARY", self.forge_pipeline)
+        self.assertIn("git merge-base HEAD origin/main", self.forge_pipeline)
 
     def test_terminal_gate_runs_after_every_predecessor_result(self) -> None:
         terminal = job_block(self.reusable, "gate")

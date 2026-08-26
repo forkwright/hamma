@@ -1,17 +1,21 @@
-"""Negative regression matrix for Hamma's Phase A contract."""
+"""Positive and negative regression matrix for Hamma's Phase A contract."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "tools/render_phase_a.py"
+SUBJECTS = ("http2-over-noise", "effective-acl", "data-plane")
+ORACLE_REVISION = "1" * 40
 
 
 class PhaseAContractTests(unittest.TestCase):
@@ -28,20 +32,58 @@ class PhaseAContractTests(unittest.TestCase):
             "[workspace]\nmembers = []\n\n[workspace.dependencies]\n",
             encoding="utf-8",
         )
+        self.run_git("init", "-b", "main")
+        self.run_git("config", "user.name", "Phase A fixture")
+        self.run_git("config", "user.email", "phase-a@example.invalid")
+        self.base_commit = self.commit_all("fixture baseline")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def run_check(self) -> subprocess.CompletedProcess[str]:
-        environment = os.environ.copy()
-        environment["HAMMA_CONTRACT_ROOT"] = str(self.root)
-        return subprocess.run(
-            ["python3", str(CHECKER), "--check"],
-            env=environment,
+    def run_git(
+        self, *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=self.root,
             check=False,
             capture_output=True,
             text=True,
         )
+        if check and result.returncode != 0:
+            self.fail(
+                f"git {' '.join(arguments)} failed:\n{result.stdout}{result.stderr}"
+            )
+        return result
+
+    def commit_all(self, message: str) -> str:
+        self.run_git("add", "--all")
+        self.run_git("commit", "-m", message)
+        return self.run_git("rev-parse", "HEAD").stdout.strip()
+
+    def renderer_environment(self, producer_boundary: str | None) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment["HAMMA_CONTRACT_ROOT"] = str(self.root)
+        environment.pop("HAMMA_PRODUCER_BOUNDARY", None)
+        if producer_boundary is not None:
+            environment["HAMMA_PRODUCER_BOUNDARY"] = producer_boundary
+        return environment
+
+    def run_renderer(
+        self, mode: str, producer_boundary: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["python3", "-B", str(CHECKER), mode],
+            env=self.renderer_environment(producer_boundary),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def run_check(
+        self, producer_boundary: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run_renderer("--check", producer_boundary)
 
     def mutate_contract(self, old: str, new: str) -> None:
         path = self.root / "contracts/phase-a.toml"
@@ -55,14 +97,200 @@ class PhaseAContractTests(unittest.TestCase):
         self.assertIn(old, content)
         path.write_text(content.replace(old, new, 1), encoding="utf-8")
 
-    def assert_rejected(self, expected: str) -> None:
-        result = self.run_check()
+    def complete_node(self, node_id: str, evidence: str | None = None) -> None:
+        path = self.root / "contracts/phase-a.toml"
+        content = path.read_text(encoding="utf-8")
+        start = content.index(f'id = "{node_id}"')
+        end = content.find("\n[[nodes]]", start)
+        if end < 0:
+            end = len(content)
+        section = content[start:end]
+        self.assertIn('state = "blocked"', section)
+        self.assertIn("evidence = []", section)
+        receipt = evidence or f"evidence/phase-a/{node_id}.toml"
+        section = section.replace('state = "blocked"', 'state = "complete"', 1)
+        section = section.replace("evidence = []", f'evidence = ["{receipt}"]', 1)
+        path.write_text(content[:start] + section + content[end:], encoding="utf-8")
+
+    def artifact_roles(self, subject: str) -> list[str]:
+        contract = tomllib.loads(
+            (self.root / "contracts/phase-a.toml").read_text(encoding="utf-8")
+        )
+        for node in contract["nodes"]:
+            if node["id"] == subject:
+                return list(node["required_artifact_roles"])
+        self.fail(f"contract has no subject {subject!r}")
+
+    def write_artifacts(self, subjects: tuple[str, ...]) -> None:
+        for subject in subjects:
+            directory = self.root / "evidence/phase-a" / subject
+            directory.mkdir(parents=True, exist_ok=True)
+            for role in self.artifact_roles(subject):
+                (directory / f"{role}.txt").write_text(
+                    f"{subject}:{role}\n",
+                    encoding="utf-8",
+                )
+
+    def land_artifacts(self, subjects: tuple[str, ...]) -> str:
+        self.write_artifacts(subjects)
+        return self.commit_all("land immutable evidence artifacts")
+
+    def write_receipt(
+        self,
+        subject: str,
+        producer_commit: str,
+        *,
+        receipt_subject: str | None = None,
+        roles: list[str] | None = None,
+        hash_overrides: dict[str, str] | None = None,
+    ) -> None:
+        selected_roles = roles if roles is not None else self.artifact_roles(subject)
+        overrides = hash_overrides or {}
+        lines = [
+            "schema = 1",
+            f'subject = "{receipt_subject or subject}"',
+            f'producer_commit = "{producer_commit}"',
+            "",
+            "[oracle]",
+            'name = "independent fixture oracle"',
+            'repository = "https://example.invalid/phase-a-oracle"',
+            f'revision = "{ORACLE_REVISION}"',
+        ]
+        for role in selected_roles:
+            relative = Path("evidence/phase-a") / subject / f"{role}.txt"
+            digest = hashlib.sha256((self.root / relative).read_bytes()).hexdigest()
+            lines.extend(
+                [
+                    "",
+                    "[[artifacts]]",
+                    f'role = "{role}"',
+                    f'path = "{relative.as_posix()}"',
+                    f'sha256 = "{overrides.get(role, digest)}"',
+                ]
+            )
+        receipt = self.root / "evidence/phase-a" / f"{subject}.toml"
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.run_git("add", receipt.relative_to(self.root).as_posix())
+
+    def prepare_completion(
+        self,
+        producer_commit: str,
+        *,
+        data_evidence: str | None = None,
+        data_subject: str | None = None,
+        data_roles: list[str] | None = None,
+        data_hashes: dict[str, str] | None = None,
+    ) -> None:
+        for subject in SUBJECTS:
+            self.write_receipt(
+                subject,
+                producer_commit,
+                receipt_subject=data_subject if subject == "data-plane" else None,
+                roles=data_roles if subject == "data-plane" else None,
+                hash_overrides=data_hashes if subject == "data-plane" else None,
+            )
+            self.complete_node(
+                subject,
+                data_evidence if subject == "data-plane" else None,
+            )
+        self.run_git("add", "contracts/phase-a.toml")
+
+    def assert_rejected(
+        self, expected: str, producer_boundary: str | None = None
+    ) -> None:
+        result = self.run_check(producer_boundary)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(expected, result.stderr)
 
     def test_current_contract_is_a_fixed_point(self) -> None:
         result = self.run_check()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_completed_data_plane_survives_synthetic_and_squash_topologies(self) -> None:
+        producer = self.land_artifacts(SUBJECTS)
+        self.run_git("switch", "-c", "completion")
+        self.prepare_completion(producer)
+        applied = self.run_renderer("--apply", producer)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        completion = self.commit_all("complete Phase A from landed evidence")
+
+        self.run_git("switch", "main")
+        self.run_git("merge", "--no-ff", "--no-edit", completion)
+        synthetic = self.run_check(producer)
+        self.assertEqual(synthetic.returncode, 0, synthetic.stdout + synthetic.stderr)
+
+        self.run_git("switch", "-c", "squash-stable", producer)
+        self.run_git("merge", "--squash", completion)
+        squash_commit = self.commit_all("squash Phase A completion")
+        pushed = self.run_check(squash_commit)
+        self.assertEqual(pushed.returncode, 0, pushed.stdout + pushed.stderr)
+
+    def test_feature_only_producer_fails_on_synthetic_merge(self) -> None:
+        stable_base = self.base_commit
+        self.run_git("switch", "-c", "feature-only-evidence")
+        producer = self.land_artifacts(("http2-over-noise",))
+        self.write_receipt("http2-over-noise", producer)
+        self.complete_node("http2-over-noise")
+        self.commit_all("claim completion from feature-only evidence")
+
+        self.run_git("switch", "main")
+        self.run_git("merge", "--no-ff", "--no-edit", "feature-only-evidence")
+        self.run_git("merge-base", "--is-ancestor", producer, "HEAD")
+        self.assertNotEqual(
+            self.run_git(
+                "merge-base",
+                "--is-ancestor",
+                producer,
+                stable_base,
+                check=False,
+            ).returncode,
+            0,
+        )
+        self.assert_rejected("ancestor of stable producer boundary", stable_base)
+
+    def test_completed_receipt_requires_explicit_producer_boundary(self) -> None:
+        producer = self.land_artifacts(("http2-over-noise",))
+        self.write_receipt("http2-over-noise", producer)
+        self.complete_node("http2-over-noise")
+        self.assert_rejected("completed receipts require HAMMA_PRODUCER_BOUNDARY")
+
+    def test_data_plane_cannot_reuse_predecessor_receipt(self) -> None:
+        producer = self.land_artifacts(SUBJECTS)
+        self.prepare_completion(
+            producer,
+            data_evidence="evidence/phase-a/http2-over-noise.toml",
+        )
+        self.assert_rejected(
+            "complete node 'data-plane' must cite only its typed receipt",
+            producer,
+        )
+
+    def test_data_plane_receipt_cannot_name_a_predecessor_subject(self) -> None:
+        producer = self.land_artifacts(SUBJECTS)
+        self.prepare_completion(producer, data_subject="effective-acl")
+        self.assert_rejected("subject='data-plane'", producer)
+
+    def test_data_plane_receipt_rejects_hash_mismatch(self) -> None:
+        producer = self.land_artifacts(SUBJECTS)
+        role = self.artifact_roles("data-plane")[0]
+        self.prepare_completion(producer, data_hashes={role: "0" * 64})
+        self.assert_rejected("receipt artifact hash mismatch", producer)
+
+    def test_data_plane_receipt_rejects_producer_artifact_drift(self) -> None:
+        producer = self.land_artifacts(SUBJECTS)
+        role = self.artifact_roles("data-plane")[0]
+        artifact = self.root / "evidence/phase-a/data-plane" / f"{role}.txt"
+        artifact.write_text("changed after the producer commit\n", encoding="utf-8")
+        self.run_git("add", artifact.relative_to(self.root).as_posix())
+        self.prepare_completion(producer)
+        self.assert_rejected("receipt artifact provenance mismatch", producer)
+
+    def test_data_plane_receipt_requires_every_activation_role(self) -> None:
+        producer = self.land_artifacts(SUBJECTS)
+        roles = self.artifact_roles("data-plane")[:-1]
+        self.prepare_completion(producer, data_roles=roles)
+        self.assert_rejected("data-plane artifact roles must be", producer)
 
     def test_tracker_identity_cannot_be_removed(self) -> None:
         self.mutate_contract("issue = 65\n", "")
@@ -137,6 +365,12 @@ class PhaseAContractTests(unittest.TestCase):
     def test_required_artifact_roles_cannot_shrink(self) -> None:
         self.mutate_contract('    "mismatch-transcript",\n', "")
         self.assert_rejected("cannot remove minimum values: mismatch-transcript")
+
+    def test_data_plane_activation_role_floor_cannot_shrink(self) -> None:
+        self.mutate_contract('    "missing-effective-policy-capability-rejection",\n', "")
+        self.assert_rejected(
+            "data-plane.required_artifact_roles cannot remove minimum values"
+        )
 
     def test_reserved_path_floor_cannot_shrink(self) -> None:
         self.mutate_contract('    "crates/dictyon/src/dataplane.rs",\n', "")

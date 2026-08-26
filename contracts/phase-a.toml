@@ -4,6 +4,7 @@ schema = 1
 id = "phase-a"
 title = "Peer-client interoperability validation"
 summary = "A self-paired registration and map-stream prototype must pass independent control-plane gates before data-plane activation."
+completion_flow = "Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges."
 
 [[nodes]]
 id = "http2-over-noise"
@@ -47,6 +48,15 @@ requires = [
     "effective-acl",
 ]
 evidence = []
+receipt = "evidence/phase-a/data-plane.toml"
+required_artifact_roles = [
+    "wireguard-interoperability-transcript",
+    "allowed-flow-transcript",
+    "denied-flow-transcript",
+    "deny-all-flow-transcript",
+    "missing-http2-capability-rejection",
+    "missing-effective-policy-capability-rejection",
+]
 reserved_paths = [
     "crates/dictyon-data-plane",
     "crates/dictyon/src/data_plane.rs",

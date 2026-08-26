@@ -10,6 +10,7 @@ source = "contracts/phase-a.toml"
 [state]
 summary = "A self-paired registration and map-stream prototype must pass independent control-plane gates before data-plane activation."
 current_phase = "Peer-client interoperability validation"
+completion_flow = "Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges."
 
 [[gates]]
 id = "http2-over-noise"

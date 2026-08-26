@@ -27,6 +27,7 @@ DOC_TARGETS = (
 )
 STATE_TARGET = ROOT / "_llm/current_state.toml"
 EVIDENCE_PREFIX = PurePosixPath("evidence/phase-a")
+PRODUCER_BOUNDARY_ENV = "HAMMA_PRODUCER_BOUNDARY"
 VALID_STATES = frozenset({"blocked", "complete"})
 PHASE_A_NODE_IDS = frozenset({"http2-over-noise", "effective-acl", "data-plane"})
 EXPECTED_PHASE = {
@@ -35,6 +36,11 @@ EXPECTED_PHASE = {
     "summary": (
         "A self-paired registration and map-stream prototype must pass independent "
         "control-plane gates before data-plane activation."
+    ),
+    "completion_flow": (
+        "Evidence artifacts land on main while their node remains blocked. A later "
+        "completion pull request cites that already-landed producer commit, preserving "
+        "provenance across squash merges."
     ),
 }
 EXPECTED_NODES = {
@@ -72,6 +78,16 @@ MINIMUM_RECEIPT_ROLES = {
             "deny-all-transcript",
             "allow-transcript",
             "deny-transcript",
+        }
+    ),
+    "data-plane": frozenset(
+        {
+            "wireguard-interoperability-transcript",
+            "allowed-flow-transcript",
+            "denied-flow-transcript",
+            "deny-all-flow-transcript",
+            "missing-http2-capability-rejection",
+            "missing-effective-policy-capability-rejection",
         }
     ),
 }
@@ -286,30 +302,33 @@ def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 must_be_tracked=True,
             )
 
-    for gate_id in ("http2-over-noise", "effective-acl"):
-        gate = by_id[gate_id]
-        receipt = require_string(gate, "receipt", gate_id)
+    producer_boundary: str | None = None
+    for node_id in EXPECTED_NODES:
+        node = by_id[node_id]
+        receipt = require_string(node, "receipt", node_id)
         receipt_path = evidence_path(
             receipt,
-            f"{gate_id} receipt",
-            must_exist=gate["state"] == "complete",
-            must_be_tracked=gate["state"] == "complete",
+            f"{node_id} receipt",
+            must_exist=node["state"] == "complete",
+            must_be_tracked=node["state"] == "complete",
         )
-        expected_receipt = f"evidence/phase-a/{gate_id}.toml"
+        expected_receipt = f"evidence/phase-a/{node_id}.toml"
         if receipt != expected_receipt:
-            raise ContractError(f"{gate_id}.receipt must remain {expected_receipt!r}")
+            raise ContractError(f"{node_id}.receipt must remain {expected_receipt!r}")
         required_roles = require_unique_string_list(
-            gate, "required_artifact_roles", gate_id
+            node, "required_artifact_roles", node_id
         )
         require_minimum(
             required_roles,
-            MINIMUM_RECEIPT_ROLES[gate_id],
-            f"{gate_id}.required_artifact_roles",
+            MINIMUM_RECEIPT_ROLES[node_id],
+            f"{node_id}.required_artifact_roles",
         )
-        if gate["state"] == "complete":
-            if gate["evidence"] != [receipt]:
-                raise ContractError(f"complete gate {gate_id!r} must cite only its typed receipt")
-            validate_receipt(gate_id, receipt_path, required_roles)
+        if node["state"] == "complete":
+            if node["evidence"] != [receipt]:
+                raise ContractError(f"complete node {node_id!r} must cite only its typed receipt")
+            if producer_boundary is None:
+                producer_boundary = stable_producer_boundary()
+            validate_receipt(node_id, receipt_path, required_roles, producer_boundary)
 
     data_plane = by_id["data-plane"]
     reserved_paths = require_unique_string_list(data_plane, "reserved_paths", "data-plane")
@@ -371,29 +390,67 @@ def tracked_repository_path(path: Path, description: str) -> Path:
     return resolved
 
 
-def validate_commit(commit: str, description: str) -> None:
+def git_environment() -> dict[str, str]:
     environment = os.environ.copy()
     environment["GIT_OPTIONAL_LOCKS"] = "0"
+    return environment
+
+
+def commit_exists(commit: str) -> bool:
     exists = subprocess.run(
         ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
         cwd=ROOT,
-        env=environment,
+        env=git_environment(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    if exists.returncode != 0:
-        raise ContractError(f"{description} does not identify a commit in this Hamma repository")
-    ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+    return exists.returncode == 0
+
+
+def is_ancestor(ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=ROOT,
-        env=environment,
+        env=git_environment(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    if ancestor.returncode != 0:
-        raise ContractError(f"{description} must be an ancestor of the checked Hamma revision")
+    return result.returncode == 0
+
+
+def stable_producer_boundary() -> str:
+    boundary = os.environ.get(PRODUCER_BOUNDARY_ENV)
+    if boundary is None or not boundary:
+        raise ContractError(
+            f"completed receipts require {PRODUCER_BOUNDARY_ENV} to name the stable "
+            "pull-request base or pushed main revision"
+        )
+    if (
+        len(boundary) != 40
+        or any(character not in "0123456789abcdef" for character in boundary)
+    ):
+        raise ContractError(f"{PRODUCER_BOUNDARY_ENV} must be a lowercase 40-hex SHA")
+    if not commit_exists(boundary):
+        raise ContractError(
+            f"{PRODUCER_BOUNDARY_ENV} does not identify a commit in this Hamma repository"
+        )
+    if not is_ancestor(boundary, "HEAD"):
+        raise ContractError(
+            f"{PRODUCER_BOUNDARY_ENV} must be an ancestor of the checked Hamma revision"
+        )
+    return boundary
+
+
+def validate_commit(commit: str, description: str, producer_boundary: str) -> None:
+    if not commit_exists(commit):
+        raise ContractError(f"{description} does not identify a commit in this Hamma repository")
+    if not is_ancestor(commit, producer_boundary):
+        raise ContractError(
+            f"{description} must be an ancestor of stable producer boundary "
+            f"{producer_boundary}"
+        )
 
 
 def artifact_at_commit(commit: str, relative: str, description: str) -> bytes:
@@ -479,13 +536,20 @@ def validate_blocked_data_plane(data_plane: dict[str, Any]) -> None:
                 )
 
 
-def validate_receipt(gate_id: str, path: Path, required_roles: list[str]) -> None:
+def validate_receipt(
+    node_id: str,
+    path: Path,
+    required_roles: list[str],
+    producer_boundary: str,
+) -> None:
     if not path.is_file():
-        raise ContractError(f"complete gate {gate_id!r} has no receipt at {path.relative_to(ROOT)}")
-    path = tracked_repository_path(path, f"{gate_id} receipt")
+        raise ContractError(f"complete node {node_id!r} has no receipt at {path.relative_to(ROOT)}")
+    path = tracked_repository_path(path, f"{node_id} receipt")
     receipt = tomllib.loads(path.read_text(encoding="utf-8"))
-    if receipt.get("schema") != 1 or receipt.get("gate") != gate_id:
-        raise ContractError(f"{path.relative_to(ROOT)} must have schema=1 and gate={gate_id!r}")
+    if receipt.get("schema") != 1 or receipt.get("subject") != node_id:
+        raise ContractError(
+            f"{path.relative_to(ROOT)} must have schema=1 and subject={node_id!r}"
+        )
     producer_commit = receipt.get("producer_commit")
     if (
         not isinstance(producer_commit, str)
@@ -493,7 +557,11 @@ def validate_receipt(gate_id: str, path: Path, required_roles: list[str]) -> Non
         or any(character not in "0123456789abcdef" for character in producer_commit)
     ):
         raise ContractError(f"{path.relative_to(ROOT)} producer_commit must be a lowercase 40-hex SHA")
-    validate_commit(producer_commit, f"{path.relative_to(ROOT)} producer_commit")
+    validate_commit(
+        producer_commit,
+        f"{path.relative_to(ROOT)} producer_commit",
+        producer_boundary,
+    )
     oracle = receipt.get("oracle")
     if not isinstance(oracle, dict):
         raise ContractError(f"{path.relative_to(ROOT)} must contain an [oracle] table")
@@ -529,10 +597,10 @@ def validate_receipt(gate_id: str, path: Path, required_roles: list[str]) -> Non
             raise ContractError(f"artifact {raw_artifact_path!r} sha256 must be lowercase 64-hex")
         resolved = evidence_path(
             raw_artifact_path,
-            f"{gate_id} artifact {role}",
+            f"{node_id} artifact {role}",
             must_exist=True,
             must_be_tracked=True,
-            subtree=PurePosixPath(f"evidence/phase-a/{gate_id}"),
+            subtree=PurePosixPath(f"evidence/phase-a/{node_id}"),
         )
         actual_sha = hashlib.sha256(resolved.read_bytes()).hexdigest()
         if actual_sha != expected_sha:
@@ -543,7 +611,7 @@ def validate_receipt(gate_id: str, path: Path, required_roles: list[str]) -> Non
         producer_bytes = artifact_at_commit(
             producer_commit,
             raw_artifact_path,
-            f"{gate_id} artifact {role}",
+            f"{node_id} artifact {role}",
         )
         producer_sha = hashlib.sha256(producer_bytes).hexdigest()
         if producer_sha != expected_sha:
@@ -553,7 +621,7 @@ def validate_receipt(gate_id: str, path: Path, required_roles: list[str]) -> Non
             )
     if set(observed_roles) != set(required_roles):
         raise ContractError(
-            f"{gate_id} artifact roles must be {sorted(required_roles)!r}, "
+            f"{node_id} artifact roles must be {sorted(required_roles)!r}, "
             f"got {sorted(observed_roles)!r}"
         )
 
@@ -585,6 +653,7 @@ def markdown_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> s
             "shrink those minimum guard sets. This bounded enforcement does not replace review "
             "for other ways a change could introduce a data plane.",
             "The public contract, not private planning prose, owns this producer order.",
+            phase["completion_flow"],
             "",
             "Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with "
             "`python3 tools/render_phase_a.py --apply`; CI runs `--check`.",
@@ -612,6 +681,7 @@ def state_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
         "[state]",
         f"summary = {toml_string(phase['summary'])}",
         f"current_phase = {toml_string(phase['title'])}",
+        f"completion_flow = {toml_string(phase['completion_flow'])}",
     ]
     for node in nodes:
         lines.extend(

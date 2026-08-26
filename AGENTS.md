@@ -6,7 +6,7 @@ tightens: gate discipline (truthful Gate-Passed trailers, no AI indicators)
 
 # Agents — hamma
 
-Clean-room Rust Tailscale-compatible mesh networking stack.
+Clean-room Rust mesh networking stack targeting Tailscale compatibility.
 
 Phase A builds the `dictyon` peer client against the tailscale.com control plane.
 
@@ -23,6 +23,7 @@ A self-paired registration and map-stream prototype must pass independent contro
 
 While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
 The public contract, not private planning prose, owns this producer order.
+Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges.
 
 Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
 <!-- phase-a:generated:end -->

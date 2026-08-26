@@ -18,6 +18,7 @@ A self-paired registration and map-stream prototype must pass independent contro
 
 While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
 The public contract, not private planning prose, owns this producer order.
+Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges.
 
 Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
 <!-- phase-a:generated:end -->
@@ -30,7 +31,7 @@ Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `pyt
 
 Structured LLM corpus:
 - [_llm/architecture.toml](_llm/architecture.toml): workspace shape, planned crates, and layers
-- [_llm/current_state.toml](_llm/current_state.toml): phase and open threads
+- [_llm/current_state.toml](_llm/current_state.toml): phase and gates
 - [contracts/phase-a.toml](contracts/phase-a.toml): public typed Phase A dependency authority
 - [_llm/decisions.toml](_llm/decisions.toml): accepted mesh-stack decisions
 - [_llm/glossary.toml](_llm/glossary.toml): hamma vocabulary

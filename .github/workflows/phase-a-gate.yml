@@ -15,11 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # WHY: completed receipts must name an ancestor and artifacts tracked
-          # at that producer revision; a shallow checkout cannot prove either.
+          # WHY: completed receipts must name a producer already on the stable
+          # PR base or pushed main history; a shallow checkout cannot prove it.
           fetch-depth: 0
           persist-credentials: false
       - name: Validate Phase A authority and workflow topology
+        env:
+          # WHY: pull_request checks run on a synthetic merge commit that is not
+          # preserved by Hamma's squash-only merges. The PR base is stable; on a
+          # main push, the pushed revision is the stable ancestry boundary.
+          HAMMA_PRODUCER_BOUNDARY: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
         run: |
           python3 -B tools/render_phase_a.py --check
           python3 -B -m unittest tools/test_render_phase_a.py tools/test_phase_a_workflow.py
