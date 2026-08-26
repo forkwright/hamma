@@ -1,113 +1,29 @@
-# WHY(kanon#2522): replaces hamma's standalone gate-attestation.yml
-# (author-keyed trailer waiver, no full-build fallback, no ai-attribution
-# check, no doc-only exemption) with the kanon-designed hybrid gate. The
-# standalone waiver keyed off `github.actor` -- whoever caused the CURRENT
-# run -- which flips to a maintainer login on "Re-run failed jobs" and
-# re-arms the trailer check on a bot PR that already passed. A separate
-# unmerged fleet branch elsewhere proposed widening that same class of waiver
-# with `startsWith(github.head_ref, 'release-please')`; head_ref is the PR
-# author's freely-chosen branch name, so any contributor could have named a
-# branch `release-please-*` and skipped the gate entirely -- the same
-# spoofable-waiver class as kanon#2628. The reusable has no actor/branch-name
-# waiver at all: an untrailered PR always routes to full-gate-build and must
-# actually compile, so there is nothing left to spoof. It also unblocks PRs
-# with no CI path that could ever produce the trailer (no local `kanon gate
-# --stamp` run) -- three hamma PRs (#77, #79, #81) sat red on this check
-# alone despite being reviewed and already-verified.
+# WHY: the public Phase A contract must participate in the existing required
+# `gate / gate` context on every pull request, including a tip carrying a
+# Gate-Passed trailer. A prerequisite job would make the reusable call skip on
+# failure, leaving the required context without a terminal failure. The local
+# reusable owns an always-run terminal aggregator under the same `gate` job id,
+# so branch protection needs no mutation.
 #
-# All gate logic lives in forkwright/.github/.github/workflows/hybrid-gate.yml
-# -- this file only supplies hamma's own commands, flags, and the two policy
-# toggles.
-#
-# WHY hosted in forkwright/.github, not forkwright/kanon: GitHub cannot
-# resolve a workflow_call reference into a private repo owned by a personal
-# account for other-repo callers -- adoption attempts pointed at kanon fail
-# to even schedule the workflow (no run appears at all, not even a failed
-# one; proven across aletheia#6438, koinon#15, heurema#9, sphragis#13). The
-# public `.github` host already serves multiple repos successfully, including
-# this repo's own prior gate-attestation.yml.
-#
-# WHY these with: values (cite): .kanon-ci.toml (forge pipeline: fmt, check
-# --workspace --all-targets --jobs 8, clippy --workspace --all-targets
-# --jobs 8 -D warnings, nextest --workspace --build-jobs 8 --test-threads 8;
-# the --jobs 8 cap is deliberate -- see .kanon-ci.toml's own header comment
-# on Threadripper OOM risk at unbounded concurrency). ci.yml carries no
-# fmt/check/clippy/nextest job of its own (only shellcheck + commitlint) --
-# .kanon-ci.toml is the sole existing source for these commands, so it is
-# mirrored exactly rather than invented.
-#
-# WHY doctest_cmd is empty: neither ci.yml nor .kanon-ci.toml runs a separate
-# doctest stage today (nextest does not execute doctests) -- left at the
-# fleet default (skip) rather than inventing coverage that doesn't exist yet.
-#
-# WHY system_packages is empty: every crate in the workspace (dictyon,
-# mitos) and every workspace dependency (snafu, serde, serde_json,
-# x25519-dalek, zeroize, rand, tokio, tracing, snow, base64, hostname,
-# rustls[ring backend]/tokio-rustls/webpki-roots, zstd, proptest, rcgen,
-# koinon) is pure Rust or vendors its own C sources (zstd-sys) -- no
-# pkg-config/apt-get lines exist in ci.yml or .kanon-ci.toml either.
-#
-# WHY needs_fleet_repo_token is false despite a git dependency: Cargo.toml
-# does carry `koinon = { git = "https://github.com/forkwright/koinon", tag =
-# "v0.1.0" }` (dev-dependency of dictyon), but forkwright/koinon is a PUBLIC
-# repo -- anonymous git-fetch works with no auth, matching every other
-# fleet-git-dependency caller today. Flip to true only if anonymous fetch is
-# later observed to flake under GitHub Actions' rate limits.
-#
-# NOTE(double-build-cost, mirrors koinon/heurema/sphragis/epistole): the
-# .kanon-ci.toml forge pipeline already runs fmt/check/clippy/nextest/kanon-lint
-# on the forge's own local gate. full-gate-build now runs the GH Actions
-# equivalent (minus kanon-lint, which is forge-only and not a GH check) for
-# trailer-less PRs -- CI-minutes duplication, not required-check duplication,
-# since only the `gate` context is required. Left as-is per fleet precedent.
+# Shared trailer verification, docs-only classification, attribution policy,
+# and full-build fallback remain centralized in forkwright/.github's hybrid
+# gate. Hamma's wrapper adds only its producer-contract check and aggregation.
 name: Gate Attestation
 
 on:
   pull_request:
     branches: [main]
-  # WHY a push trigger and not just pull_request: a squash merge does not
-  # carry the source commits' trailers, so no commit on main has a
-  # Gate-Passed trailer -- check-trailer finds none and routes to
-  # full-gate-build, which is the job that actually compiles the workspace.
-  # Without this nothing ever builds main, and the first PR to inherit a
-  # merged break is what discovers it (forkwright/theatron#235).
+  # WHY: merged main must be built as its own tree; a pre-merge trailer attests
+  # a different tree after squash, rebase, or intervening merges.
   push:
     branches: [main]
 
 permissions:
   contents: read
 
-# WHY no concurrency: block here: hybrid-gate.yml itself already declares
-# `concurrency: group: ${{ github.workflow }}-${{ github.ref }}` and its own
-# comment states callers must NOT also set a concurrency group with that
-# same key, or the shared group self-cancels. hamma's PRIOR file set this
-# exact key -- dropped here, not carried forward, for that reason.
-
+# WHY no caller concurrency: the shared hybrid gate owns the repo/ref-scoped
+# group. Repeating it here can make a reusable call cancel itself.
 jobs:
   gate:
-    # WHY @main, not pinned: the concern behind the old SHA pin was real -- a
-    # mutable branch ref lets the remote workflow's behavior change under an
-    # already-merged hamma commit with no local diff to review. But its
-    # mitigation was the manual refresh procedure this comment used to cite,
-    # and nobody ran it: forkwright/.github publishes no tags, so dependabot
-    # never bumps this pin either, and the SHA just froze -- this file sat on
-    # d74efb1d, a revision predating a fix for a race in this very reusable.
-    # forkwright/.github is first-party -- same org, same trust boundary --
-    # not the third-party supply-chain case a SHA pin defends against, and a
-    # floating ref can't go stale the way a hand-refreshed one did.
-    uses: forkwright/.github/.github/workflows/hybrid-gate.yml@main
-    with:
-      # WHY defaults kept as-is: hamma has its own rust-toolchain.toml
-      # (channel = "1.88") -- auto-detect applies, no rust_toolchain
-      # override needed.
-      fmt_cmd: "cargo fmt --all -- --check"
-      check_cmd: "cargo check --workspace --all-targets --jobs 8"
-      clippy_cmd: "cargo clippy --workspace --all-targets --jobs 8 -- -D warnings"
-      nextest_cmd: "cargo nextest run --workspace --build-jobs 8 --test-threads 8"
-      doctest_cmd: ""
-      system_packages: ""
-      needs_fleet_repo_token: false
-      rust_cache_key: "gate-attestation"
-      ai_attribution_check: true
-      docs_only_exemption: true
+    uses: ./.github/workflows/phase-a-gate.yml
     secrets: inherit

@@ -1,0 +1,68 @@
+# Hamma-local wrapper around the fleet hybrid gate.
+name: Phase A Gate (reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  phase-a-contract:
+    name: phase-a-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # WHY: completed receipts must name an ancestor and artifacts tracked
+          # at that producer revision; a shallow checkout cannot prove either.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate Phase A authority and workflow topology
+        run: |
+          python3 -B tools/render_phase_a.py --check
+          python3 -B -m unittest tools/test_render_phase_a.py tools/test_phase_a_workflow.py
+
+  shared-gate:
+    # WHY @main: first-party fleet policy intentionally floats; callers pin
+    # third-party actions, while the shared policy must not freeze silently.
+    uses: forkwright/.github/.github/workflows/hybrid-gate.yml@main
+    with:
+      fmt_cmd: "cargo fmt --all -- --check"
+      check_cmd: "cargo check --workspace --all-targets --jobs 8"
+      clippy_cmd: "cargo clippy --workspace --all-targets --jobs 8 -- -D warnings"
+      nextest_cmd: "cargo nextest run --workspace --build-jobs 8 --test-threads 8"
+      doctest_cmd: ""
+      system_packages: ""
+      # WHY: forkwright/koinon is public; the development dependency fetches
+      # anonymously and needs no repository credential.
+      needs_fleet_repo_token: false
+      rust_cache_key: "gate-attestation"
+      ai_attribution_check: true
+      # WHY: docs may skip the Rust rebuild, but phase-a-contract still runs
+      # independently and reaches the terminal required context.
+      docs_only_exemption: true
+    secrets: inherit
+
+  gate:
+    name: gate
+    needs: [phase-a-contract, shared-gate]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate Hamma gate result
+        env:
+          CONTRACT_RESULT: ${{ needs.phase-a-contract.result }}
+          SHARED_GATE_RESULT: ${{ needs.shared-gate.result }}
+        run: |
+          if [ "$CONTRACT_RESULT" != "success" ]; then
+            echo "ERROR: Phase A contract check did not pass (result: ${CONTRACT_RESULT})." >&2
+            exit 1
+          fi
+          if [ "$SHARED_GATE_RESULT" != "success" ]; then
+            echo "ERROR: shared hybrid gate did not pass (result: ${SHARED_GATE_RESULT})." >&2
+            exit 1
+          fi
+          echo "Phase A contract and shared hybrid gate passed."

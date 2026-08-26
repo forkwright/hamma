@@ -2,11 +2,11 @@
 //!
 //! *δίκτυον - a net, a cast net, a thing woven to catch.*
 //!
-//! Peer-side client for the hamma mesh networking stack. Speaks
-//! wire-compatible Tailscale control protocol to an upstream coordination
-//! server (tailscale.com during Phase A, histos when sovereignty is wanted),
-//! drives a `WireGuard` data plane via boringtun, traverses NATs through DERP
-//! relays, and resolves peer names via `MagicDNS`.
+//! Peer-side client for the hamma mesh networking stack. It is building toward
+//! Tailscale control-protocol interoperability with an upstream coordination
+//! server. HTTP/2-over-Noise interoperability and authoritative effective-ACL
+//! policy remain explicit gates before data-plane activation; see
+//! `contracts/phase-a.toml` at the repository root.
 //!
 //! ## Status
 //!
@@ -16,7 +16,7 @@
 //!
 //! ## Scope
 //!
-//! - `WireGuard` data plane (via `boringtun`, when wired)
+//! - Gated peer data plane (not yet activated)
 //! - Noise-framed control protocol client
 //! - DERP relay client for NAT traversal fallback
 //! - `MagicDNS` resolver
