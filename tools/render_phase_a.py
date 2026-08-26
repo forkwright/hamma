@@ -116,6 +116,11 @@ def require_table(value: object, name: str) -> dict[str, Any]:
     return value
 
 
+def require_schema_one(value: object, owner: str) -> None:
+    if type(value) is not int or value != 1:
+        raise ContractError(f"{owner} schema must be the integer 1")
+
+
 def require_string(table: dict[str, Any], key: str, owner: str) -> str:
     value = table.get(key)
     if not isinstance(value, str) or not value:
@@ -234,8 +239,7 @@ def validate_graph(
 
 def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     raw = tomllib.loads(CONTRACT.read_text(encoding="utf-8"))
-    if raw.get("schema") != 1:
-        raise ContractError("contracts/phase-a.toml schema must equal 1")
+    require_schema_one(raw.get("schema"), "contracts/phase-a.toml")
 
     phase = require_table(raw.get("phase"), "phase")
     for field, expected in EXPECTED_PHASE.items():
@@ -546,9 +550,10 @@ def validate_receipt(
         raise ContractError(f"complete node {node_id!r} has no receipt at {path.relative_to(ROOT)}")
     path = tracked_repository_path(path, f"{node_id} receipt")
     receipt = tomllib.loads(path.read_text(encoding="utf-8"))
-    if receipt.get("schema") != 1 or receipt.get("subject") != node_id:
+    require_schema_one(receipt.get("schema"), path.relative_to(ROOT).as_posix())
+    if receipt.get("subject") != node_id:
         raise ContractError(
-            f"{path.relative_to(ROOT)} must have schema=1 and subject={node_id!r}"
+            f"{path.relative_to(ROOT)} must have subject={node_id!r}"
         )
     producer_commit = receipt.get("producer_commit")
     if (

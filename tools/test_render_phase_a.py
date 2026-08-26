@@ -140,6 +140,7 @@ class PhaseAContractTests(unittest.TestCase):
         subject: str,
         producer_commit: str,
         *,
+        schema_literal: str = "1",
         receipt_subject: str | None = None,
         roles: list[str] | None = None,
         hash_overrides: dict[str, str] | None = None,
@@ -147,7 +148,7 @@ class PhaseAContractTests(unittest.TestCase):
         selected_roles = roles if roles is not None else self.artifact_roles(subject)
         overrides = hash_overrides or {}
         lines = [
-            "schema = 1",
+            f"schema = {schema_literal}",
             f'subject = "{receipt_subject or subject}"',
             f'producer_commit = "{producer_commit}"',
             "",
@@ -207,6 +208,14 @@ class PhaseAContractTests(unittest.TestCase):
         result = self.run_check()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_contract_schema_rejects_toml_boolean(self) -> None:
+        self.mutate_contract("schema = 1", "schema = true")
+        self.assert_rejected("contracts/phase-a.toml schema must be the integer 1")
+
+    def test_contract_schema_rejects_toml_float(self) -> None:
+        self.mutate_contract("schema = 1", "schema = 1.0")
+        self.assert_rejected("contracts/phase-a.toml schema must be the integer 1")
+
     def test_completed_data_plane_survives_synthetic_and_squash_topologies(self) -> None:
         producer = self.land_artifacts(SUBJECTS)
         self.run_git("switch", "-c", "completion")
@@ -222,9 +231,29 @@ class PhaseAContractTests(unittest.TestCase):
 
         self.run_git("switch", "-c", "squash-stable", producer)
         self.run_git("merge", "--squash", completion)
-        squash_commit = self.commit_all("squash Phase A completion")
-        pushed = self.run_check(squash_commit)
+        self.commit_all("squash Phase A completion")
+        pushed = self.run_check(producer)
         self.assertEqual(pushed.returncode, 0, pushed.stdout + pushed.stderr)
+
+    def test_same_push_cannot_land_producer_and_completion(self) -> None:
+        prior_main = self.base_commit
+        self.run_git("switch", "-c", "single-push-completion")
+        producer = self.land_artifacts(SUBJECTS)
+        self.prepare_completion(producer)
+        applied = self.run_renderer("--apply", producer)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        completion = self.commit_all("complete Phase A in the same push")
+        self.assertEqual(
+            self.run_git(
+                "merge-base",
+                "--is-ancestor",
+                producer,
+                completion,
+                check=False,
+            ).returncode,
+            0,
+        )
+        self.assert_rejected("ancestor of stable producer boundary", prior_main)
 
     def test_feature_only_producer_fails_on_synthetic_merge(self) -> None:
         stable_base = self.base_commit
@@ -254,6 +283,18 @@ class PhaseAContractTests(unittest.TestCase):
         self.write_receipt("http2-over-noise", producer)
         self.complete_node("http2-over-noise")
         self.assert_rejected("completed receipts require HAMMA_PRODUCER_BOUNDARY")
+
+    def test_receipt_schema_rejects_toml_boolean(self) -> None:
+        producer = self.land_artifacts(("http2-over-noise",))
+        self.write_receipt("http2-over-noise", producer, schema_literal="true")
+        self.complete_node("http2-over-noise")
+        self.assert_rejected("schema must be the integer 1", producer)
+
+    def test_receipt_schema_rejects_toml_float(self) -> None:
+        producer = self.land_artifacts(("http2-over-noise",))
+        self.write_receipt("http2-over-noise", producer, schema_literal="1.0")
+        self.complete_node("http2-over-noise")
+        self.assert_rejected("schema must be the integer 1", producer)
 
     def test_data_plane_cannot_reuse_predecessor_receipt(self) -> None:
         producer = self.land_artifacts(SUBJECTS)

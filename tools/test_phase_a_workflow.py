@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import tomllib
 import unittest
 
 
@@ -11,6 +12,18 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRYPOINT = ROOT / ".github/workflows/gate-attestation.yml"
 REUSABLE = ROOT / ".github/workflows/phase-a-gate.yml"
 FORGE_PIPELINE = ROOT / ".kanon-ci.toml"
+TRUSTED_GITHUB_BOUNDARY = (
+    "${{ github.event_name == 'pull_request' && "
+    "github.event.pull_request.base.sha || github.event.before }}"
+)
+TRUSTED_FORGE_COMMAND = (
+    'producer_boundary="$(git merge-base HEAD origin/main)" && '
+    'test -n "$producer_boundary" && '
+    'HAMMA_PRODUCER_BOUNDARY="$producer_boundary" '
+    "python3 -B tools/render_phase_a.py --check && "
+    "python3 -B -m unittest tools/test_render_phase_a.py "
+    "tools/test_phase_a_workflow.py"
+)
 
 
 def job_block(document: str, job_id: str) -> str:
@@ -23,6 +36,25 @@ def job_block(document: str, job_id: str) -> str:
     if match is None:
         raise AssertionError(f"workflow has no {job_id!r} job")
     return match.group("body")
+
+
+def validate_trusted_boundaries(reusable: str, forge_pipeline: str) -> None:
+    contract = job_block(reusable, "phase-a-contract")
+    assignments = re.findall(
+        r"(?m)^\s+HAMMA_PRODUCER_BOUNDARY:\s*(?P<value>.+)$",
+        contract,
+    )
+    if assignments != [TRUSTED_GITHUB_BOUNDARY]:
+        raise AssertionError(
+            "Phase A GitHub boundary must use the exact PR-base/push-before expression"
+        )
+
+    pipeline = tomllib.loads(forge_pipeline)
+    command = pipeline["stages"]["phase-a contract"]["cmd"]
+    if command != TRUSTED_FORGE_COMMAND:
+        raise AssertionError(
+            "Phase A forge boundary must fail closed around the exact origin/main merge base"
+        )
 
 
 class PhaseAWorkflowTests(unittest.TestCase):
@@ -50,12 +82,19 @@ class PhaseAWorkflowTests(unittest.TestCase):
         )
 
     def test_receipt_boundary_uses_stable_event_and_forge_revisions(self) -> None:
-        contract = job_block(self.reusable, "phase-a-contract")
-        self.assertIn("HAMMA_PRODUCER_BOUNDARY:", contract)
-        self.assertIn("github.event.pull_request.base.sha", contract)
-        self.assertIn("github.sha", contract)
-        self.assertIn("HAMMA_PRODUCER_BOUNDARY", self.forge_pipeline)
-        self.assertIn("git merge-base HEAD origin/main", self.forge_pipeline)
+        validate_trusted_boundaries(self.reusable, self.forge_pipeline)
+
+    def test_receipt_boundary_rejects_synthetic_head_with_decoy_comment(self) -> None:
+        mutated = self.reusable.replace(
+            f"HAMMA_PRODUCER_BOUNDARY: {TRUSTED_GITHUB_BOUNDARY}",
+            "# github.event.pull_request.base.sha remains documented here only\n"
+            "          HAMMA_PRODUCER_BOUNDARY: ${{ github.sha }}",
+            1,
+        )
+        self.assertNotEqual(mutated, self.reusable)
+        self.assertIn("github.event.pull_request.base.sha", mutated)
+        with self.assertRaisesRegex(AssertionError, "exact PR-base/push-before"):
+            validate_trusted_boundaries(mutated, self.forge_pipeline)
 
     def test_terminal_gate_runs_after_every_predecessor_result(self) -> None:
         terminal = job_block(self.reusable, "gate")

@@ -10,7 +10,7 @@ source_docs = [
 ]
 
 [architecture]
-summary = "Clean-room Rust implementation of a Tailscale-compatible mesh networking stack, starting with the dictyon client and shared mitos types."
+summary = "Clean-room Rust mesh networking stack targeting Tailscale compatibility, starting with the dictyon client and shared mitos types."
 layers = [
   "core-types",
   "client",
