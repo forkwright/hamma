@@ -8,9 +8,14 @@ generated = true
 source = "contracts/phase-a.toml"
 
 [state]
-summary = "A self-paired registration and map-stream prototype must pass independent control-plane gates before data-plane activation."
+summary = "Phase A declares the prerequisite order for future independent control-plane validation; completion and data-plane activation are unavailable until authenticated independent-oracle authority lands."
 current_phase = "Peer-client interoperability validation"
-completion_flow = "Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges."
+completion_flow = "Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain blocked, but metadata does not authorize completion. Every complete transition fails closed until #122 lands an authenticated independent-oracle verifier."
+
+[completion_authority]
+state = "unavailable"
+required_mechanism = "authenticated-independent-oracle"
+issue = 122
 
 [[gates]]
 id = "http2-over-noise"

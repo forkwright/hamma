@@ -15,7 +15,9 @@ import tomllib
 from typing import Any
 
 
-ROOT = Path(os.environ.get("HAMMA_CONTRACT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+ROOT = Path(
+    os.environ.get("HAMMA_CONTRACT_ROOT", Path(__file__).resolve().parents[1])
+).resolve()
 CONTRACT = ROOT / "contracts/phase-a.toml"
 MARKER_START = "<!-- phase-a:generated:start -->"
 MARKER_END = "<!-- phase-a:generated:end -->"
@@ -34,14 +36,20 @@ EXPECTED_PHASE = {
     "id": "phase-a",
     "title": "Peer-client interoperability validation",
     "summary": (
-        "A self-paired registration and map-stream prototype must pass independent "
-        "control-plane gates before data-plane activation."
+        "Phase A declares the prerequisite order for future independent control-plane "
+        "validation; completion and data-plane activation are unavailable until authenticated "
+        "independent-oracle authority lands."
     ),
     "completion_flow": (
-        "Evidence artifacts land on main while their node remains blocked. A later "
-        "completion pull request cites that already-landed producer commit, preserving "
-        "provenance across squash merges."
+        "Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain "
+        "blocked, but metadata does not authorize completion. Every complete transition fails "
+        "closed until #122 lands an authenticated independent-oracle verifier."
     ),
+}
+EXPECTED_COMPLETION_AUTHORITY = {
+    "state": "unavailable",
+    "required_mechanism": "authenticated-independent-oracle",
+    "issue": 122,
 }
 EXPECTED_NODES = {
     "http2-over-noise": {
@@ -130,19 +138,25 @@ def require_string(table: dict[str, Any], key: str, owner: str) -> str:
 
 def require_string_list(table: dict[str, Any], key: str, owner: str) -> list[str]:
     value = table.get(key)
-    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item for item in value
+    ):
         raise ContractError(f"{owner}.{key} must be an array of non-empty strings")
     return value
 
 
-def require_unique_string_list(table: dict[str, Any], key: str, owner: str) -> list[str]:
+def require_unique_string_list(
+    table: dict[str, Any], key: str, owner: str
+) -> list[str]:
     values = require_string_list(table, key, owner)
     if len(values) != len(set(values)):
         raise ContractError(f"{owner}.{key} must not contain duplicates")
     return values
 
 
-def require_minimum(values: list[str], minimum: frozenset[str], description: str) -> None:
+def require_minimum(
+    values: list[str], minimum: frozenset[str], description: str
+) -> None:
     missing = minimum - set(values)
     if missing:
         raise ContractError(
@@ -152,12 +166,18 @@ def require_minimum(values: list[str], minimum: frozenset[str], description: str
 
 def canonical_relative_path(raw: str, description: str) -> PurePosixPath:
     if "\\" in raw:
-        raise ContractError(f"{description} must use canonical POSIX separators: {raw!r}")
+        raise ContractError(
+            f"{description} must use canonical POSIX separators: {raw!r}"
+        )
     relative = PurePosixPath(raw)
     if relative.is_absolute():
         raise ContractError(f"{description} must not be absolute: {raw!r}")
-    if relative.as_posix() != raw or any(part in {".", ".."} for part in relative.parts):
-        raise ContractError(f"{description} must not contain traversal or normalization: {raw!r}")
+    if relative.as_posix() != raw or any(
+        part in {".", ".."} for part in relative.parts
+    ):
+        raise ContractError(
+            f"{description} must not contain traversal or normalization: {raw!r}"
+        )
     if not relative.parts:
         raise ContractError(f"{description} must not be empty")
     return relative
@@ -173,7 +193,9 @@ def evidence_path(
 ) -> Path:
     relative = canonical_relative_path(raw, description)
     if not relative.is_relative_to(subtree):
-        raise ContractError(f"{description} must live under {subtree.as_posix()}/: {raw}")
+        raise ContractError(
+            f"{description} must live under {subtree.as_posix()}/: {raw}"
+        )
 
     candidate = ROOT
     for part in relative.parts:
@@ -188,7 +210,9 @@ def evidence_path(
     except RuntimeError as error:
         raise ContractError(f"{description} contains a symlink loop: {raw}") from error
     if not resolved_subtree.is_relative_to(resolved_root):
-        raise ContractError(f"{description} evidence subtree escapes the repository: {raw}")
+        raise ContractError(
+            f"{description} evidence subtree escapes the repository: {raw}"
+        )
     if not resolved_candidate.is_relative_to(resolved_root):
         raise ContractError(f"{description} escapes the repository: {raw}")
     if not resolved_candidate.is_relative_to(resolved_subtree):
@@ -234,10 +258,12 @@ def validate_graph(
                     "the declared order is executable"
                 )
             if node["state"] == "complete" and by_id[dependency]["state"] != "complete":
-                raise ContractError(f"{node_id} cannot be complete while {dependency} is incomplete")
+                raise ContractError(
+                    f"{node_id} cannot be complete while {dependency} is incomplete"
+                )
 
 
-def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def read_contract() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     raw = tomllib.loads(CONTRACT.read_text(encoding="utf-8"))
     require_schema_one(raw.get("schema"), "contracts/phase-a.toml")
 
@@ -245,7 +271,36 @@ def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     for field, expected in EXPECTED_PHASE.items():
         actual = require_string(phase, field, "phase")
         if actual != expected:
-            raise ContractError(f"phase.{field} must remain {expected!r}, got {actual!r}")
+            raise ContractError(
+                f"phase.{field} must remain {expected!r}, got {actual!r}"
+            )
+
+    completion_authority = require_table(
+        raw.get("completion_authority"), "completion_authority"
+    )
+    if set(completion_authority) != set(EXPECTED_COMPLETION_AUTHORITY):
+        raise ContractError(
+            "completion_authority must contain exactly state, required_mechanism, and issue"
+        )
+    authority_state = require_string(
+        completion_authority, "state", "completion_authority"
+    )
+    if authority_state != EXPECTED_COMPLETION_AUTHORITY["state"]:
+        raise ContractError(
+            "completion_authority.state must remain 'unavailable' until #122 lands an "
+            "authenticated independent-oracle verifier"
+        )
+    required_mechanism = require_string(
+        completion_authority, "required_mechanism", "completion_authority"
+    )
+    if required_mechanism != EXPECTED_COMPLETION_AUTHORITY["required_mechanism"]:
+        raise ContractError(
+            "completion_authority.required_mechanism must remain "
+            "'authenticated-independent-oracle'"
+        )
+    authority_issue = completion_authority.get("issue")
+    if type(authority_issue) is not int or authority_issue != 122:
+        raise ContractError("completion_authority.issue must be the integer 122")
 
     nodes_value = raw.get("nodes")
     if not isinstance(nodes_value, list) or not nodes_value:
@@ -256,7 +311,10 @@ def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     for index, raw_node in enumerate(nodes_value):
         node = require_table(raw_node, f"nodes[{index}]")
         node_id = require_string(node, "id", f"nodes[{index}]")
-        if any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in node_id):
+        if any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+            for character in node_id
+        ):
             raise ContractError(f"node id {node_id!r} must be lowercase kebab-case")
         if node_id in by_id:
             raise ContractError(f"duplicate node id {node_id!r}")
@@ -266,14 +324,23 @@ def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
             raise ContractError(f"{node_id}.kind must be gate or activation")
         state = require_string(node, "state", node_id)
         if state not in VALID_STATES:
-            raise ContractError(f"{node_id}.state must be one of {sorted(VALID_STATES)}")
+            raise ContractError(
+                f"{node_id}.state must be one of {sorted(VALID_STATES)}"
+            )
         require_unique_string_list(node, "requires", node_id)
         evidence = require_unique_string_list(node, "evidence", node_id)
         issue = node.get("issue")
-        if issue is not None and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
-            raise ContractError(f"{node_id}.issue must be a positive integer when present")
-        if state == "complete" and not evidence:
-            raise ContractError(f"complete node {node_id!r} must cite repository evidence")
+        if issue is not None and (
+            not isinstance(issue, int) or isinstance(issue, bool) or issue < 1
+        ):
+            raise ContractError(
+                f"{node_id}.issue must be a positive integer when present"
+            )
+        if state == "complete":
+            raise ContractError(
+                "completion authority is unavailable pending #122; nodes cannot transition "
+                f"to complete: {node_id}"
+            )
         nodes.append(node)
         by_id[node_id] = node
 
@@ -329,13 +396,19 @@ def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         )
         if node["state"] == "complete":
             if node["evidence"] != [receipt]:
-                raise ContractError(f"complete node {node_id!r} must cite only its typed receipt")
+                raise ContractError(
+                    f"complete node {node_id!r} must cite only its typed receipt"
+                )
             if producer_boundary is None:
                 producer_boundary = stable_producer_boundary()
-            validate_receipt(node_id, receipt_path, required_roles, producer_boundary)
+            validate_receipt_groundwork(
+                node_id, receipt_path, required_roles, producer_boundary
+            )
 
     data_plane = by_id["data-plane"]
-    reserved_paths = require_unique_string_list(data_plane, "reserved_paths", "data-plane")
+    reserved_paths = require_unique_string_list(
+        data_plane, "reserved_paths", "data-plane"
+    )
     forbidden_packages = require_unique_string_list(
         data_plane, "forbidden_packages", "data-plane"
     )
@@ -356,12 +429,14 @@ def read_contract() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     for raw_path in reserved_paths:
         relative = canonical_relative_path(raw_path, "data-plane reserved path")
         if not relative.is_relative_to(PurePosixPath("crates")):
-            raise ContractError(f"data-plane reserved path must live under crates/: {raw_path}")
+            raise ContractError(
+                f"data-plane reserved path must live under crates/: {raw_path}"
+            )
 
     if data_plane["state"] != "complete":
         validate_blocked_data_plane(data_plane)
 
-    return phase, nodes
+    return phase, completion_authority, nodes
 
 
 def tracked_repository_path(path: Path, description: str) -> Path:
@@ -431,9 +506,8 @@ def stable_producer_boundary() -> str:
             f"completed receipts require {PRODUCER_BOUNDARY_ENV} to name the stable "
             "pull-request base or pushed main revision"
         )
-    if (
-        len(boundary) != 40
-        or any(character not in "0123456789abcdef" for character in boundary)
+    if len(boundary) != 40 or any(
+        character not in "0123456789abcdef" for character in boundary
     ):
         raise ContractError(f"{PRODUCER_BOUNDARY_ENV} must be a lowercase 40-hex SHA")
     if not commit_exists(boundary):
@@ -449,7 +523,9 @@ def stable_producer_boundary() -> str:
 
 def validate_commit(commit: str, description: str, producer_boundary: str) -> None:
     if not commit_exists(commit):
-        raise ContractError(f"{description} does not identify a commit in this Hamma repository")
+        raise ContractError(
+            f"{description} does not identify a commit in this Hamma repository"
+        )
     if not is_ancestor(commit, producer_boundary):
         raise ContractError(
             f"{description} must be an ancestor of stable producer boundary "
@@ -518,7 +594,7 @@ def validate_blocked_data_plane(data_plane: dict[str, Any]) -> None:
 
     for manifest_path in ROOT.rglob("Cargo.toml"):
         relative_manifest = manifest_path.relative_to(ROOT)
-        if any(part in {".git", "target"} for part in relative_manifest.parts):
+        if ".git" in relative_manifest.parts or relative_manifest.parts[0] == "target":
             continue
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
         forbidden = dependency_identities(manifest) & forbidden_packages
@@ -530,7 +606,7 @@ def validate_blocked_data_plane(data_plane: dict[str, Any]) -> None:
 
     for source_path in ROOT.rglob("*.rs"):
         relative_source = source_path.relative_to(ROOT)
-        if any(part in {".git", "target"} for part in relative_source.parts):
+        if ".git" in relative_source.parts or relative_source.parts[0] == "target":
             continue
         source = source_path.read_text(encoding="utf-8")
         for token in forbidden_tokens:
@@ -540,28 +616,30 @@ def validate_blocked_data_plane(data_plane: dict[str, Any]) -> None:
                 )
 
 
-def validate_receipt(
+def validate_receipt_groundwork(
     node_id: str,
     path: Path,
     required_roles: list[str],
     producer_boundary: str,
 ) -> None:
     if not path.is_file():
-        raise ContractError(f"complete node {node_id!r} has no receipt at {path.relative_to(ROOT)}")
+        raise ContractError(
+            f"complete node {node_id!r} has no receipt at {path.relative_to(ROOT)}"
+        )
     path = tracked_repository_path(path, f"{node_id} receipt")
     receipt = tomllib.loads(path.read_text(encoding="utf-8"))
     require_schema_one(receipt.get("schema"), path.relative_to(ROOT).as_posix())
     if receipt.get("subject") != node_id:
-        raise ContractError(
-            f"{path.relative_to(ROOT)} must have subject={node_id!r}"
-        )
+        raise ContractError(f"{path.relative_to(ROOT)} must have subject={node_id!r}")
     producer_commit = receipt.get("producer_commit")
     if (
         not isinstance(producer_commit, str)
         or len(producer_commit) != 40
         or any(character not in "0123456789abcdef" for character in producer_commit)
     ):
-        raise ContractError(f"{path.relative_to(ROOT)} producer_commit must be a lowercase 40-hex SHA")
+        raise ContractError(
+            f"{path.relative_to(ROOT)} producer_commit must be a lowercase 40-hex SHA"
+        )
     validate_commit(
         producer_commit,
         f"{path.relative_to(ROOT)} producer_commit",
@@ -571,15 +649,15 @@ def validate_receipt(
     if not isinstance(oracle, dict):
         raise ContractError(f"{path.relative_to(ROOT)} must contain an [oracle] table")
     oracle_name = require_string(oracle, "name", "oracle")
-    oracle_repository = require_string(oracle, "repository", "oracle")
+    require_string(oracle, "repository", "oracle")
     oracle_revision = require_string(oracle, "revision", "oracle")
-    if "forkwright/hamma" in oracle_repository.lower():
-        raise ContractError(f"{path.relative_to(ROOT)} oracle must be independent of Hamma")
-    if (
-        len(oracle_revision) != 40
-        or any(character not in "0123456789abcdef" for character in oracle_revision)
+    # INVARIANT: Receipt metadata is inert until #122 lands authenticated authority.
+    if len(oracle_revision) != 40 or any(
+        character not in "0123456789abcdef" for character in oracle_revision
     ):
-        raise ContractError(f"{path.relative_to(ROOT)} oracle revision must be lowercase 40-hex")
+        raise ContractError(
+            f"{path.relative_to(ROOT)} oracle revision must be lowercase 40-hex"
+        )
     if not oracle_name.strip():
         raise ContractError(f"{path.relative_to(ROOT)} oracle name cannot be blank")
     artifacts = receipt.get("artifacts")
@@ -588,18 +666,26 @@ def validate_receipt(
     observed_roles: list[str] = []
     observed_paths: set[str] = set()
     for index, raw_artifact in enumerate(artifacts):
-        artifact = require_table(raw_artifact, f"{path.relative_to(ROOT)} artifacts[{index}]")
+        artifact = require_table(
+            raw_artifact, f"{path.relative_to(ROOT)} artifacts[{index}]"
+        )
         role = require_string(artifact, "role", f"artifacts[{index}]")
         if role in observed_roles:
             raise ContractError(f"receipt contains duplicate artifact role {role!r}")
         observed_roles.append(role)
         raw_artifact_path = require_string(artifact, "path", f"artifacts[{index}]")
         if raw_artifact_path in observed_paths:
-            raise ContractError(f"receipt contains duplicate artifact path {raw_artifact_path!r}")
+            raise ContractError(
+                f"receipt contains duplicate artifact path {raw_artifact_path!r}"
+            )
         observed_paths.add(raw_artifact_path)
         expected_sha = require_string(artifact, "sha256", f"artifacts[{index}]")
-        if len(expected_sha) != 64 or any(character not in "0123456789abcdef" for character in expected_sha):
-            raise ContractError(f"artifact {raw_artifact_path!r} sha256 must be lowercase 64-hex")
+        if len(expected_sha) != 64 or any(
+            character not in "0123456789abcdef" for character in expected_sha
+        ):
+            raise ContractError(
+                f"artifact {raw_artifact_path!r} sha256 must be lowercase 64-hex"
+            )
         resolved = evidence_path(
             raw_artifact_path,
             f"{node_id} artifact {role}",
@@ -631,7 +717,11 @@ def validate_receipt(
         )
 
 
-def markdown_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
+def markdown_projection(
+    phase: dict[str, Any],
+    completion_authority: dict[str, Any],
+    nodes: list[dict[str, Any]],
+) -> str:
     lines = [
         MARKER_START,
         phase["summary"],
@@ -642,7 +732,9 @@ def markdown_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> s
     for index, node in enumerate(nodes, start=1):
         issue = node.get("issue")
         tracker = (
-            f"[#{issue}](https://github.com/forkwright/hamma/issues/{issue})" if issue else "—"
+            f"[#{issue}](https://github.com/forkwright/hamma/issues/{issue})"
+            if issue
+            else "—"
         )
         requires = ", ".join(f"`{item}`" for item in node["requires"]) or "—"
         evidence = ", ".join(f"[`{item}`]({item})" for item in node["evidence"]) or "—"
@@ -653,6 +745,14 @@ def markdown_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> s
     lines.extend(
         [
             "",
+            "Completion authority is `"
+            + completion_authority["state"]
+            + "` pending [#"
+            + str(completion_authority["issue"])
+            + "](https://github.com/forkwright/hamma/issues/"
+            + str(completion_authority["issue"])
+            + "). No node may transition to `complete`, and data-plane activation remains "
+            "unavailable, until an authenticated independent-oracle verifier lands.",
             "While `data-plane` is blocked, the checker rejects every listed reserved activation "
             "path, dependency identity, and source token, and contract validation refuses to "
             "shrink those minimum guard sets. This bounded enforcement does not replace review "
@@ -672,7 +772,11 @@ def toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def state_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
+def state_projection(
+    phase: dict[str, Any],
+    completion_authority: dict[str, Any],
+    nodes: list[dict[str, Any]],
+) -> str:
     lines = [
         "# Generated by tools/render_phase_a.py from contracts/phase-a.toml.",
         "# Do not edit this file directly.",
@@ -687,6 +791,12 @@ def state_projection(phase: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
         f"summary = {toml_string(phase['summary'])}",
         f"current_phase = {toml_string(phase['title'])}",
         f"completion_flow = {toml_string(phase['completion_flow'])}",
+        "",
+        "[completion_authority]",
+        f"state = {toml_string(completion_authority['state'])}",
+        "required_mechanism = "
+        + toml_string(completion_authority["required_mechanism"]),
+        f"issue = {completion_authority['issue']}",
     ]
     for node in nodes:
         lines.extend(
@@ -715,18 +825,25 @@ def replace_block(path: Path, rendered: str) -> str:
     start = current.find(MARKER_START)
     end = current.find(MARKER_END)
     if start < 0 or end < 0 or end < start:
-        raise ContractError(f"{path.relative_to(ROOT)} must contain one bounded Phase A block")
-    if current.find(MARKER_START, start + 1) >= 0 or current.find(MARKER_END, end + 1) >= 0:
-        raise ContractError(f"{path.relative_to(ROOT)} contains duplicate Phase A markers")
+        raise ContractError(
+            f"{path.relative_to(ROOT)} must contain one bounded Phase A block"
+        )
+    if (
+        current.find(MARKER_START, start + 1) >= 0
+        or current.find(MARKER_END, end + 1) >= 0
+    ):
+        raise ContractError(
+            f"{path.relative_to(ROOT)} contains duplicate Phase A markers"
+        )
     end += len(MARKER_END)
     return current[:start] + rendered + current[end:]
 
 
 def desired_files() -> dict[Path, str]:
-    phase, nodes = read_contract()
-    rendered = markdown_projection(phase, nodes)
+    phase, completion_authority, nodes = read_contract()
+    rendered = markdown_projection(phase, completion_authority, nodes)
     desired = {path: replace_block(path, rendered) for path in DOC_TARGETS}
-    desired[STATE_TARGET] = state_projection(phase, nodes)
+    desired[STATE_TARGET] = state_projection(phase, completion_authority, nodes)
     return desired
 
 

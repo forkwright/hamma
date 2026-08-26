@@ -25,11 +25,14 @@ for Phase A ordering and evidence. Regenerate its bounded projections with:
 python3 -B tools/render_phase_a.py --apply
 ```
 
-The result must then be a fixed point under `--check`. Evidence completion is a
-two-stage process: first land immutable producer artifacts on `main` while the
-node remains blocked, then open a later completion pull request whose typed
-receipt cites that already-landed producer commit. Do not combine those stages
-in one pull request or push.
+The result must then be a fixed point under `--check`. Completion authority is
+currently unavailable: immutable producer artifacts and typed
+receipt/provenance groundwork may land on `main` while nodes remain blocked,
+but neither metadata nor a later pull request can advance a node to `complete`.
+Issue #122 must land an authenticated independent-oracle verifier before the
+contract can enable completion. Once enabled, producer evidence and completion
+must remain separate stages so a receipt can cite an already-landed producer
+commit.
 
 ## Validation authority
 

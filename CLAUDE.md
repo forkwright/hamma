@@ -78,7 +78,7 @@ kanon lint . --summary           # full kanon lint
 ## Current phase
 
 <!-- phase-a:generated:start -->
-A self-paired registration and map-stream prototype must pass independent control-plane gates before data-plane activation.
+Phase A declares the prerequisite order for future independent control-plane validation; completion and data-plane activation are unavailable until authenticated independent-oracle authority lands.
 
 | Order | Gate | Tracker | State | Requires | Evidence |
 |---:|---|---|---|---|---|
@@ -86,9 +86,10 @@ A self-paired registration and map-stream prototype must pass independent contro
 | 2 | `effective-acl` — Authoritative effective ACL policy | [#67](https://github.com/forkwright/hamma/issues/67) | `blocked` | `http2-over-noise` | — |
 | 3 | `data-plane` — WireGuard data-plane activation | — | `blocked` | `http2-over-noise`, `effective-acl` | — |
 
+Completion authority is `unavailable` pending [#122](https://github.com/forkwright/hamma/issues/122). No node may transition to `complete`, and data-plane activation remains unavailable, until an authenticated independent-oracle verifier lands.
 While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
 The public contract, not private planning prose, owns this producer order.
-Evidence artifacts land on main while their node remains blocked. A later completion pull request cites that already-landed producer commit, preserving provenance across squash merges.
+Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain blocked, but metadata does not authorize completion. Every complete transition fails closed until #122 lands an authenticated independent-oracle verifier.
 
 Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
 <!-- phase-a:generated:end -->
