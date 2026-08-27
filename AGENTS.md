@@ -6,16 +6,35 @@ tightens: gate discipline (truthful Gate-Passed trailers, no AI indicators)
 
 # Agents — hamma
 
-Clean-room Rust Tailscale-compatible mesh networking stack.
+Clean-room Rust mesh networking stack targeting Tailscale compatibility.
 
-Phase A: `dictyon` peer client against tailscale.com control plane.
+Phase A builds the `dictyon` peer client against the tailscale.com control plane.
+
+## Phase A dependency order
+
+<!-- phase-a:generated:start -->
+Phase A declares the prerequisite order for future independent control-plane validation; completion and data-plane activation are unavailable until authenticated independent-oracle authority lands.
+
+| Order | Gate | Tracker | State | Requires | Evidence |
+|---:|---|---|---|---|---|
+| 1 | `http2-over-noise` — HTTP/2 over Noise interoperability | [#65](https://github.com/forkwright/hamma/issues/65) | `blocked` | — | — |
+| 2 | `effective-acl` — Authoritative effective ACL policy | [#67](https://github.com/forkwright/hamma/issues/67) | `blocked` | `http2-over-noise` | — |
+| 3 | `data-plane` — WireGuard data-plane activation | — | `blocked` | `http2-over-noise`, `effective-acl` | — |
+
+Completion authority is `unavailable` pending [#122](https://github.com/forkwright/hamma/issues/122). No node may transition to `complete`, and data-plane activation remains unavailable, until an authenticated independent-oracle verifier lands.
+While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
+The public contract, not private planning prose, owns this producer order.
+Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain blocked, but metadata does not authorize completion. Every complete transition fails closed until #122 lands an authenticated independent-oracle verifier.
+
+Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
+<!-- phase-a:generated:end -->
 
 ## Crates
 
 | Name | Role | Status |
 |---|---|---|
-| `dictyon` | Peer client: Noise IK handshake, TCP/TLS control channel, registration, map streaming, zstd frame support | Phase A active |
-| `mitos` | Shared types: Noise framing, WireGuard key types, peer identity, ACL, protocol constants | Phase A active |
+| `dictyon` | Peer client: control transport, registration, map streaming, and eventually the gated data plane | Phase A |
+| `mitos` | Shared types: Noise framing, WireGuard key types, peer identity, ACL, protocol constants | Phase A |
 | `histos` | Coordination server (planned) | Not started |
 | `hamma-derp` | DERP relay server (planned) | Not started |
 

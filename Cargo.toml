@@ -41,7 +41,7 @@ disallowed_methods = "deny"
 disallowed_types = "deny"
 
 [workspace.dependencies]
-# Fleet scaffolding
+# Standalone shared development support
 koinon = { git = "https://github.com/forkwright/koinon", tag = "v0.2.0" }
 
 # Error handling
@@ -54,8 +54,7 @@ webpki-roots = "1"
 # Tracing
 tracing = "0.1"
 
-# Crypto primitives (placeholder — actual WireGuard uses boringtun)
-# boringtun = "0.6"  # uncomment when dictyon data plane begins
+# Crypto primitives used by the current control-plane implementation.
 
 # System info
 hostname = "0.4"

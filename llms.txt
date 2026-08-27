@@ -2,7 +2,27 @@
 
 > Clean-room Rust mesh networking stack targeting Tailscale compatibility.
 
-Hamma starts with `dictyon`, a peer client that validates against tailscale.com before the fleet builds `histos`, the sovereign coordination server. Phase A is pre-alpha and currently points at the WireGuard data-plane milestone.
+Hamma starts with `dictyon`, a peer client targeting validation against tailscale.com before the
+fleet builds `histos`, the sovereign coordination server.
+
+## Phase A dependency order
+
+<!-- phase-a:generated:start -->
+Phase A declares the prerequisite order for future independent control-plane validation; completion and data-plane activation are unavailable until authenticated independent-oracle authority lands.
+
+| Order | Gate | Tracker | State | Requires | Evidence |
+|---:|---|---|---|---|---|
+| 1 | `http2-over-noise` — HTTP/2 over Noise interoperability | [#65](https://github.com/forkwright/hamma/issues/65) | `blocked` | — | — |
+| 2 | `effective-acl` — Authoritative effective ACL policy | [#67](https://github.com/forkwright/hamma/issues/67) | `blocked` | `http2-over-noise` | — |
+| 3 | `data-plane` — WireGuard data-plane activation | — | `blocked` | `http2-over-noise`, `effective-acl` | — |
+
+Completion authority is `unavailable` pending [#122](https://github.com/forkwright/hamma/issues/122). No node may transition to `complete`, and data-plane activation remains unavailable, until an authenticated independent-oracle verifier lands.
+While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
+The public contract, not private planning prose, owns this producer order.
+Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain blocked, but metadata does not authorize completion. Every complete transition fails closed until #122 lands an authenticated independent-oracle verifier.
+
+Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
+<!-- phase-a:generated:end -->
 
 ## Library
 
@@ -12,7 +32,8 @@ Hamma starts with `dictyon`, a peer client that validates against tailscale.com 
 
 Structured LLM corpus:
 - [_llm/architecture.toml](_llm/architecture.toml): workspace shape, planned crates, and layers
-- [_llm/current_state.toml](_llm/current_state.toml): phase and open threads
+- [_llm/current_state.toml](_llm/current_state.toml): phase and gates
+- [contracts/phase-a.toml](contracts/phase-a.toml): public typed Phase A dependency authority
 - [_llm/decisions.toml](_llm/decisions.toml): accepted mesh-stack decisions
 - [_llm/glossary.toml](_llm/glossary.toml): hamma vocabulary
 

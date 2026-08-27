@@ -25,8 +25,9 @@ use std::fmt;
 /// not implement. Advertising it would be a false claim of support. 71 is
 /// the value this client already spoke at its most-implemented call site
 /// (the `/key` endpoint) before the three control-plane version numbers
-/// were unified here; it covers the capabilities Phase A actually
-/// implements (peer `WireGuard`, registration, full/delta map streaming).
+/// were unified here; it is a compatibility target for the currently
+/// implemented registration and map-stream prototype, not proof that every
+/// upstream capability through 71 is implemented.
 /// Bumping it is a protocol claim -- "hamma implements everything through
 /// vN" -- not a tuning knob: pair any change with the feature that earns it.
 pub const CAPABILITY_VERSION: CapabilityVersion = CapabilityVersion(71);

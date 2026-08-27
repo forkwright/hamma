@@ -1,5 +1,5 @@
 <!--
-scope: hamma repo conventions (Tailscale-compatible mesh networking in pure Rust: dictyon, mitos, future histos)
+scope: hamma repo conventions (pure-Rust mesh networking targeting Tailscale compatibility: dictyon, mitos, future histos)
 defers_to: ~/menos-ops/CLAUDE.md for machine topology; ~/.claude/CLAUDE.md for operator principles; kanon standards for universal engineering policy
 tightens: no-unsafe/no-unwrap discipline, boringtun as the only audited unsafe boundary
 -->
@@ -10,9 +10,13 @@ Project orientation for AI coding agents working on hamma.
 
 ## What hamma is
 
-A clean-room Rust Tailscale-compatible mesh networking stack. Pre-alpha, with Phase A implementation underway in the `dictyon` peer client. Built as the networking layer for the forkwright ecosystem (aletheia, akroasis, harmonia, thumos) and as an OSS contribution to the Rust networking ecosystem.
+A clean-room Rust mesh networking stack targeting Tailscale compatibility. Phase A builds the `dictyon` peer
+client as the networking layer for the forkwright ecosystem and as an OSS contribution to the
+Rust networking ecosystem.
 
-See [README.md](README.md) for the public-facing description and [projects/hamma/](https://github.com/forkwright/kanon/tree/main/projects/hamma) in kanon for the full roadmap, phase plans, and decision log.
+See [README.md](README.md) for the public-facing description and
+[`contracts/phase-a.toml`](contracts/phase-a.toml) for the typed producer dependency graph.
+Private Kanon planning consumes that public contract for fleet coordination.
 
 ## Standards
 
@@ -73,7 +77,22 @@ kanon lint . --summary           # full kanon lint
 
 ## Current phase
 
-**Phase A**: dictyon client against tailscale.com control plane. No histos scope yet. Milestone: dictyon can join an existing tailnet, establish peer-to-peer WG tunnels with tailscale.com-managed peers, resolve MagicDNS names, and route via Mullvad exit nodes.
+<!-- phase-a:generated:start -->
+Phase A declares the prerequisite order for future independent control-plane validation; completion and data-plane activation are unavailable until authenticated independent-oracle authority lands.
+
+| Order | Gate | Tracker | State | Requires | Evidence |
+|---:|---|---|---|---|---|
+| 1 | `http2-over-noise` — HTTP/2 over Noise interoperability | [#65](https://github.com/forkwright/hamma/issues/65) | `blocked` | — | — |
+| 2 | `effective-acl` — Authoritative effective ACL policy | [#67](https://github.com/forkwright/hamma/issues/67) | `blocked` | `http2-over-noise` | — |
+| 3 | `data-plane` — WireGuard data-plane activation | — | `blocked` | `http2-over-noise`, `effective-acl` | — |
+
+Completion authority is `unavailable` pending [#122](https://github.com/forkwright/hamma/issues/122). No node may transition to `complete`, and data-plane activation remains unavailable, until an authenticated independent-oracle verifier lands.
+While `data-plane` is blocked, the checker rejects every listed reserved activation path, dependency identity, and source token, and contract validation refuses to shrink those minimum guard sets. This bounded enforcement does not replace review for other ways a change could introduce a data plane.
+The public contract, not private planning prose, owns this producer order.
+Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain blocked, but metadata does not authorize completion. Every complete transition fails closed until #122 lands an authenticated independent-oracle verifier.
+
+Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `python3 tools/render_phase_a.py --apply`; CI runs `--check`.
+<!-- phase-a:generated:end -->
 
 ## License
 
@@ -82,7 +101,8 @@ Dual MIT / Apache-2.0 (idiomatic Rust ecosystem standard). See `LICENSE-MIT` and
 ## Dependencies on other forkwright projects
 
 - **kanon**: standards, lint engine. Dev-time dependency.
-- **koinon** (akroasis-provided shared crate): may become a workspace dep if we need ID types shared with RF intelligence layers.
+- **koinon**: standalone shared crate used only as a `dictyon` development dependency; the root
+  Cargo manifest is the dependency authority.
 
 Hamma does NOT depend on aletheia, thumos, harmonia, or akroasis at runtime. Those projects depend on hamma, not the reverse.
 

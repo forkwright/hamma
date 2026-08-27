@@ -1,0 +1,82 @@
+schema = 1
+
+[phase]
+id = "phase-a"
+title = "Peer-client interoperability validation"
+summary = "Phase A declares the prerequisite order for future independent control-plane validation; completion and data-plane activation are unavailable until authenticated independent-oracle authority lands."
+completion_flow = "Evidence artifacts and typed receipt/provenance groundwork may land while nodes remain blocked, but metadata does not authorize completion. Every complete transition fails closed until #122 lands an authenticated independent-oracle verifier."
+
+[completion_authority]
+state = "unavailable"
+required_mechanism = "authenticated-independent-oracle"
+issue = 122
+
+[[nodes]]
+id = "http2-over-noise"
+title = "HTTP/2 over Noise interoperability"
+kind = "gate"
+issue = 65
+state = "blocked"
+requires = []
+evidence = []
+receipt = "evidence/phase-a/http2-over-noise.toml"
+required_artifact_roles = [
+    "initiation-frame",
+    "noise-prologue",
+    "success-transcript",
+    "mismatch-transcript",
+]
+
+[[nodes]]
+id = "effective-acl"
+title = "Authoritative effective ACL policy"
+kind = "gate"
+issue = 67
+state = "blocked"
+requires = ["http2-over-noise"]
+evidence = []
+receipt = "evidence/phase-a/effective-acl.toml"
+required_artifact_roles = [
+    "policy-input",
+    "deny-all-transcript",
+    "allow-transcript",
+    "deny-transcript",
+]
+
+[[nodes]]
+id = "data-plane"
+title = "WireGuard data-plane activation"
+kind = "activation"
+state = "blocked"
+requires = [
+    "http2-over-noise",
+    "effective-acl",
+]
+evidence = []
+receipt = "evidence/phase-a/data-plane.toml"
+required_artifact_roles = [
+    "wireguard-interoperability-transcript",
+    "allowed-flow-transcript",
+    "denied-flow-transcript",
+    "deny-all-flow-transcript",
+    "missing-http2-capability-rejection",
+    "missing-effective-policy-capability-rejection",
+]
+reserved_paths = [
+    "crates/dictyon-data-plane",
+    "crates/dictyon/src/data_plane.rs",
+    "crates/dictyon/src/dataplane.rs",
+]
+forbidden_packages = [
+    "boringtun",
+    "wireguard-control",
+    "wireguard-rs",
+    "tun",
+    "rtnetlink",
+]
+forbidden_source_tokens = [
+    "boringtun::",
+    "wireguard_control::",
+    "/dev/net/tun",
+    "TUNSETIFF",
+]

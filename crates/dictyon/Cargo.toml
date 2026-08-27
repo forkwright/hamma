@@ -1,6 +1,6 @@
 [package]
 name = "dictyon"
-description = "Clean-room Rust Tailscale-compatible mesh networking client"
+description = "Clean-room Rust mesh client targeting Tailscale compatibility"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

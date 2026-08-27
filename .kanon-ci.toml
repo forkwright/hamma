@@ -4,8 +4,9 @@
 
 # Forge CI pipeline for forkwright/hamma.
 #
-# Mirrors the hardcoded default Rust gate (fmt → check → clippy → nextest
-# → lint) but pins per-stage build + test concurrency to 8. Without this
+# Prepends the public Phase A contract check to the hardcoded default Rust
+# gate (fmt → check → clippy → nextest → lint), then pins per-stage build and
+# test concurrency to 8. Without this
 # cap, cargo defaults to num_cpus (64 on this Threadripper) and parallel
 # rustc + nextest processes peak well over 100GB of RSS — enough to OOM
 # menos when any other fleet work is running. 8 is the budget that keeps
@@ -17,7 +18,11 @@
 # flags should differ.
 
 [pipeline]
-stages = ["cargo fmt", "cargo check", "cargo clippy", "cargo nextest", "kanon lint"]
+stages = ["phase-a contract", "cargo fmt", "cargo check", "cargo clippy", "cargo nextest", "kanon lint"]
+
+[stages."phase-a contract"]
+cmd = "producer_boundary=\"$(git merge-base HEAD origin/main)\" && test -n \"$producer_boundary\" && HAMMA_PRODUCER_BOUNDARY=\"$producer_boundary\" python3 -B tools/render_phase_a.py --check && python3 -B -m unittest tools/test_render_phase_a.py tools/test_phase_a_workflow.py"
+timeout_secs = 60
 
 [stages."cargo fmt"]
 cmd = "cargo fmt --all -- --check"
