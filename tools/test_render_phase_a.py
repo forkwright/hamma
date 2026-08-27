@@ -185,6 +185,35 @@ class PhaseAContractTests(unittest.TestCase):
         self.mutate_contract("schema = 1", "schema = 1.0")
         self.assert_rejected("contracts/phase-a.toml schema must be the integer 1")
 
+    def test_contract_root_rejects_unknown_key(self) -> None:
+        self.mutate_contract(
+            "schema = 1\n",
+            "schema = 1\nunexpected_root = true\n",
+        )
+        self.assert_rejected(
+            "contracts/phase-a.toml contains unknown keys: unexpected_root"
+        )
+
+    def test_phase_rejects_unknown_key(self) -> None:
+        self.mutate_contract("[phase]\n", "[phase]\nunexpected_phase = true\n")
+        self.assert_rejected("phase contains unknown keys: unexpected_phase")
+
+    def test_gate_node_rejects_unknown_key(self) -> None:
+        self.mutate_contract(
+            'id = "http2-over-noise"\n',
+            'id = "http2-over-noise"\nrecepit = "evidence/phase-a/fake.toml"\n',
+        )
+        self.assert_rejected("http2-over-noise contains unknown keys: recepit")
+
+    def test_data_plane_node_rejects_unknown_key(self) -> None:
+        self.mutate_contract(
+            'id = "data-plane"\n',
+            'id = "data-plane"\nforbidden_source_token = ["boringtun::"]\n',
+        )
+        self.assert_rejected(
+            "data-plane contains unknown keys: forbidden_source_token"
+        )
+
     def test_untrusted_oracle_metadata_cannot_enable_completion(self) -> None:
         producer = self.land_artifacts(("http2-over-noise",))
         self.write_untrusted_receipt("http2-over-noise", producer)

@@ -46,10 +46,30 @@ EXPECTED_PHASE = {
         "closed until #122 lands an authenticated independent-oracle verifier."
     ),
 }
+ROOT_KEYS = frozenset({"schema", "phase", "completion_authority", "nodes"})
+PHASE_KEYS = frozenset(EXPECTED_PHASE)
 EXPECTED_COMPLETION_AUTHORITY = {
     "state": "unavailable",
     "required_mechanism": "authenticated-independent-oracle",
     "issue": 122,
+}
+COMMON_NODE_KEYS = frozenset(
+    {
+        "id",
+        "title",
+        "kind",
+        "state",
+        "requires",
+        "evidence",
+        "receipt",
+        "required_artifact_roles",
+    }
+)
+GATE_NODE_KEYS = COMMON_NODE_KEYS | {"issue"}
+DATA_PLANE_NODE_KEYS = COMMON_NODE_KEYS | {
+    "reserved_paths",
+    "forbidden_packages",
+    "forbidden_source_tokens",
 }
 EXPECTED_NODES = {
     "http2-over-noise": {
@@ -127,6 +147,16 @@ def require_table(value: object, name: str) -> dict[str, Any]:
 def require_schema_one(value: object, owner: str) -> None:
     if type(value) is not int or value != 1:
         raise ContractError(f"{owner} schema must be the integer 1")
+
+
+def reject_unknown_keys(
+    table: dict[str, Any], allowed: frozenset[str], owner: str
+) -> None:
+    unknown = set(table) - allowed
+    if unknown:
+        raise ContractError(
+            f"{owner} contains unknown keys: {', '.join(sorted(unknown))}"
+        )
 
 
 def require_string(table: dict[str, Any], key: str, owner: str) -> str:
@@ -266,6 +296,7 @@ def validate_graph(
 def read_contract() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     raw = tomllib.loads(CONTRACT.read_text(encoding="utf-8"))
     require_schema_one(raw.get("schema"), "contracts/phase-a.toml")
+    reject_unknown_keys(raw, ROOT_KEYS, "contracts/phase-a.toml")
 
     phase = require_table(raw.get("phase"), "phase")
     for field, expected in EXPECTED_PHASE.items():
@@ -274,6 +305,7 @@ def read_contract() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]
             raise ContractError(
                 f"phase.{field} must remain {expected!r}, got {actual!r}"
             )
+    reject_unknown_keys(phase, PHASE_KEYS, "phase")
 
     completion_authority = require_table(
         raw.get("completion_authority"), "completion_authority"
@@ -336,6 +368,15 @@ def read_contract() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]
             raise ContractError(
                 f"{node_id}.issue must be a positive integer when present"
             )
+        if node_id == "data-plane" and "issue" in node:
+            raise ContractError(
+                "data-plane.issue must remain absent; #118 tracks the producer contract, "
+                "not data-plane implementation"
+            )
+        allowed_keys = (
+            DATA_PLANE_NODE_KEYS if node_id == "data-plane" else GATE_NODE_KEYS
+        )
+        reject_unknown_keys(node, allowed_keys, node_id)
         if state == "complete":
             raise ContractError(
                 "completion authority is unavailable pending #122; nodes cannot transition "
