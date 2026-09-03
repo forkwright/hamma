@@ -26,7 +26,12 @@ jobs:
 
   attest-release-source:
     needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true'
+    # WHY the visibility guard: build-provenance attestation 403s on
+    # user-owned PRIVATE repos ("Feature not available for user-owned private
+    # repositories"), so without it every release burns red post-tag on this
+    # repo class. Public callers keep the attestation; private callers keep
+    # everything else. The release itself already happened by this job's gate.
+    if: needs.release-please.outputs.release_created == 'true' && github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
