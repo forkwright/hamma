@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "dictyon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "hostname",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "mitos"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "rand 0.10.2",

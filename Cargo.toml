@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/forkwright/hamma"
@@ -72,7 +72,7 @@ proptest = "1"
 toml = "1.1"
 
 # Local workspace crates
-mitos = { path = "crates/mitos", version = "0.2.0" }
+mitos = { path = "crates/mitos", version = "0.3.0" }
 
 # Expanded forms (inline table exceeded 80 columns; MSRV 1.85 predates TOML 1.1
 # multi-line inline tables, so use [workspace.dependencies.X] blocks instead).
