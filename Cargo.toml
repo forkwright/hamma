@@ -42,7 +42,7 @@ disallowed_types = "deny"
 
 [workspace.dependencies]
 # Standalone shared development support
-koinon = { git = "https://github.com/forkwright/koinon", tag = "v0.2.0" }
+koinon = { git = "https://github.com/forkwright/koinon", tag = "v0.2.1" }
 
 # Error handling
 snafu = "0.9"
