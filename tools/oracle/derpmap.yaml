@@ -1,0 +1,15 @@
+# Stub DERP map for the oracle harness: the witness exercises only the
+# control-plane handshake, so a single STUN-only node satisfies headscale's
+# non-empty-map startup requirement without depending on external relays.
+regions:
+  900:
+    regionid: 900
+    regioncode: oracle
+    regionname: oracle-local
+    nodes:
+      - name: oracle-stub
+        regionid: 900
+        hostname: 127.0.0.1
+        stunport: 3478
+        stunonly: true
+        derpport: 0

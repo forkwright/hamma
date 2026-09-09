@@ -1,0 +1,33 @@
+# Minimal headscale config for the hamma TS2021 oracle harness.
+# TLS terminates here with the harness-generated cert; no DERP, no DNS,
+# no policy — the witness only exercises the key fetch + Noise handshake.
+server_url: https://127.0.0.1:18089
+listen_addr: 0.0.0.0:8080
+metrics_listen_addr: 127.0.0.1:9090
+grpc_listen_addr: 127.0.0.1:50443
+grpc_allow_insecure: true
+noise:
+  private_key_path: /etc/headscale/noise_private.key
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+  allocation: sequential
+derp:
+  server:
+    enabled: false
+  paths:
+    - /etc/headscale/derpmap.yaml
+database:
+  type: sqlite
+  sqlite:
+    path: /var/lib/headscale/db.sqlite
+policy:
+  mode: file
+  path: ""
+dns:
+  magic_dns: false
+  override_local_dns: false
+tls_cert_path: /etc/headscale/server.crt
+tls_key_path: /etc/headscale/server.key
+log:
+  level: info
