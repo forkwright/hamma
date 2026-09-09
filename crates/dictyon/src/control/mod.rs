@@ -81,6 +81,26 @@ pub enum ControlError {
         /// Length of the payload that could not be framed.
         len: usize,
     },
+
+    /// The first non-keepalive map response omitted this machine's `Node`,
+    /// so the netmap was not initialized.
+    ///
+    /// The self node anchors this machine's identity, addresses, and
+    /// key-expiry state; initializing without one would publish a fabricated
+    /// identity as if it were real (issue #127).
+    #[snafu(display("initial map response carries no self node"))]
+    MissingInitialSelfNode,
+
+    /// The first non-keepalive map response carried a self `Node` that
+    /// failed key/routing-data validation, so the netmap was not
+    /// initialized (issue #127).
+    #[snafu(display(
+        "initial map response self node (id {node_id}) failed key/routing-data validation"
+    ))]
+    InvalidInitialSelfNode {
+        /// Server-assigned ID of the rejected self node.
+        node_id: i64,
+    },
 }
 
 impl From<crate::transport::TransportError> for ControlError {
@@ -114,7 +134,7 @@ impl From<crate::wire::WireError> for ControlError {
 /// let client = ControlClient::new(conn, machine_key, node_key, disco_key);
 /// let reg_resp = client.register(None)?;
 /// let map_resp = client.map_request()?;
-/// client.apply_map_response(map_resp);
+/// client.apply_map_response(map_resp)?;
 /// ```
 pub struct ControlClient {
     #[expect(
@@ -290,7 +310,10 @@ impl ControlClient {
     ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on I/O or parse failure.
+    /// Returns [`ControlError`] on I/O or parse failure, or when the first
+    /// non-keepalive response carries no valid self node (see
+    /// [`Self::apply_map_response`]) -- in that case the client is left
+    /// uninitialized rather than running on a fabricated identity.
     pub async fn recv_map_update(
         &mut self,
         stream: &mut AsyncControlStream,
@@ -303,7 +326,7 @@ impl ControlClient {
             is_keepalive,
             "received map update",
         );
-        self.apply_map_response(resp);
+        self.apply_map_response(resp)?;
         Ok(is_keepalive)
     }
 
@@ -375,11 +398,13 @@ impl ControlClient {
     /// list and self node are set. On subsequent delta responses:
     ///
     /// - `peers_changed`: each changed/added peer replaces the existing
-    ///   entry with the same key, or is appended if new.
+    ///   entry with the same node ID, or is appended if new.
     /// - `peers_changed_patch`: lightweight mutations are applied to known
     ///   peers with matching node IDs.
     /// - `peers_removed`: peers with matching node IDs or keys are removed.
-    /// - `node`: updates the self node if present.
+    /// - `node`: updates the self node if present and valid; a malformed
+    ///   self node in a delta is dropped, preserving the previously
+    ///   validated identity.
     /// - `dns_config` and `derp_map`: replace the previous values if
     ///   present.
     ///
@@ -391,15 +416,25 @@ impl ControlClient {
     /// resolver address, are validated before entering the netmap; a peer,
     /// self-node update, or resolver that fails is dropped rather than
     /// admitted with unparseable data.
-    pub fn apply_map_response(&mut self, resp: MapResponse) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError::MissingInitialSelfNode`] or
+    /// [`ControlError::InvalidInitialSelfNode`] when this response would
+    /// initialize the netmap but carries no valid self node; the client is
+    /// left uninitialized and no state from the response is retained.
+    /// Delta responses are infallible -- malformed fields in them are
+    /// dropped with a warning.
+    pub fn apply_map_response(&mut self, resp: MapResponse) -> Result<(), ControlError> {
         if resp.keep_alive == Some(true) {
-            return;
+            return Ok(());
         }
 
         match &mut self.netmap {
-            None => self.netmap = Some(Netmap::from_full_response(resp)),
+            None => self.netmap = Some(Netmap::from_full_response(resp)?),
             Some(netmap) => netmap.apply_delta(resp),
         }
+        Ok(())
     }
 
     /// Returns a slice of the current peers, or an empty slice if the

@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use mitos::types::{DerpMap, DnsConfig, MapResponse, Node, PeerChange, PeerRemoval};
 use tracing::warn;
 
+use super::ControlError;
 use super::validate::{
     dns_resolver_is_valid, endpoints_are_valid, is_valid_disco_key, is_valid_node_key,
     node_is_valid,
@@ -47,24 +48,27 @@ pub struct Netmap {
 impl Netmap {
     /// Build a netmap from the first full [`MapResponse`].
     ///
-    /// A missing or malformed self node falls back to a zero-value [`Node`]
-    /// -- see [`node_is_valid`] for what "malformed" means; missing peers
-    /// default to an empty list, and a peer failing that same check is
-    /// dropped rather than admitted to the initial list.
-    pub(super) fn from_full_response(resp: MapResponse) -> Self {
-        let self_node = resp
-            .node
-            .filter(|node| {
-                let valid = node_is_valid(node);
-                if !valid {
-                    warn!(
-                        node_id = node.id,
-                        "rejected malformed self node in initial map response"
-                    );
-                }
-                valid
-            })
-            .unwrap_or_else(zero_value_node);
+    /// The response must carry a self [`Node`] that passes
+    /// [`node_is_valid`]: the self node anchors this machine's identity,
+    /// addresses, and key-expiry state, so initializing without one would
+    /// publish a fabricated identity as if it were real (issue #127).
+    /// Missing peers default to an empty list, and a peer failing that same
+    /// check is dropped rather than admitted to the initial list.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError::MissingInitialSelfNode`] when the response
+    /// omits `Node`, or [`ControlError::InvalidInitialSelfNode`] when the
+    /// self node fails validation. Delta responses are handled differently
+    /// -- see [`Netmap::apply_delta`].
+    pub(super) fn from_full_response(resp: MapResponse) -> Result<Self, ControlError> {
+        let self_node = match resp.node {
+            Some(node) if node_is_valid(&node) => node,
+            Some(node) => {
+                return Err(ControlError::InvalidInitialSelfNode { node_id: node.id });
+            }
+            None => return Err(ControlError::MissingInitialSelfNode),
+        };
 
         let mut peers = resp.peers.unwrap_or_default();
         let before = peers.len();
@@ -75,14 +79,15 @@ impl Netmap {
                 "rejected malformed peers in the initial map response"
             );
         }
+        dedupe_peers_by_id(&mut peers);
         cap_peers(&mut peers);
 
-        Self {
+        Ok(Self {
             self_node,
             peers,
             dns_config: resp.dns_config.map(sanitize_dns_config),
             derp_map: resp.derp_map,
-        }
+        })
     }
 
     /// Apply a delta [`MapResponse`] onto an already-initialized netmap.
@@ -108,6 +113,7 @@ impl Netmap {
                     "rejected malformed peers in a full peer-list replacement"
                 );
             }
+            dedupe_peers_by_id(&mut peers);
             cap_peers(&mut peers);
             self.peers = peers;
         }
@@ -124,7 +130,13 @@ impl Netmap {
                     rejected += 1;
                     continue;
                 }
-                if let Some(existing) = self.peers.iter_mut().find(|p| p.key == changed_peer.key) {
+                // WHY: peers are indexed by the server-assigned node ID --
+                // the same identity patches and removals address. Matching
+                // by key instead would treat a key rotation delivered as a
+                // full record as a new peer and retain the stale-key record
+                // alongside it (issue #126); the reference implementation
+                // keys its peer map by node ID for the same reason.
+                if let Some(existing) = self.peers.iter_mut().find(|p| p.id == changed_peer.id) {
                     // WHY: an update to a peer already held is not growth, so it
                     // still applies once the netmap has reached the cap.
                     *existing = changed_peer;
@@ -183,15 +195,24 @@ fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
         peer.cap = Some(cap);
     }
 
-    if let Some(endpoints) = change.endpoints.filter(|endpoints| !endpoints.is_empty()) {
-        if endpoints_are_valid(&endpoints) {
-            peer.endpoints = Some(endpoints);
-        } else {
-            warn!(
-                node_id = peer.id,
-                "rejected malformed endpoints in a peer patch"
-            );
+    // WHY: tri-state patch semantics (issue #126) -- an omitted field
+    // leaves the stored endpoints untouched, while an explicitly empty list
+    // revokes every previously advertised direct endpoint. Collapsing the
+    // two would keep the client dialing an address the server deliberately
+    // removed.
+    match change.endpoints {
+        Some(endpoints) if endpoints.is_empty() => peer.endpoints = Some(Vec::new()),
+        Some(endpoints) => {
+            if endpoints_are_valid(&endpoints) {
+                peer.endpoints = Some(endpoints);
+            } else {
+                warn!(
+                    node_id = peer.id,
+                    "rejected malformed endpoints in a peer patch"
+                );
+            }
         }
+        None => {}
     }
 
     if let Some(key) = change.key {
@@ -226,25 +247,26 @@ fn apply_peer_change(peers: &mut [Node], change: PeerChange) {
     }
 }
 
-/// A [`Node`] with no identity or routing data -- the fallback used when the
-/// server omits `Node` entirely, or sends one that fails validation.
-fn zero_value_node() -> Node {
-    Node {
-        id: 0,
-        stable_id: None,
-        key: String::new(), // kanon:ignore RUST/plain-string-secret -- public key hex, not a secret
-        machine: None,
-        name: String::new(),
-        cap: None,
-        tags: None,
-        addresses: Vec::new(),
-        allowed_ips: None,
-        endpoints: None,
-        derp: None,
-        disco_key: None,
-        key_expiry: None,
-        last_seen: None,
-        online: None,
+/// Drop records after the first that repeat a node ID already present in a
+/// server-supplied peer list.
+///
+/// WHY: the netmap keeps one live record per node ID (issue #126) -- the
+/// same identity that patches and removals address. A full list naming one
+/// ID twice is a server protocol violation; keeping the first record is a
+/// deterministic resolution that cannot leave two divergent records for one
+/// peer.
+///
+/// Shared by both paths that accept a whole list from the server, so the
+/// invariant cannot be enforced on one and forgotten on the other.
+fn dedupe_peers_by_id(peers: &mut Vec<Node>) {
+    let mut seen = HashSet::new();
+    let before = peers.len();
+    peers.retain(|peer| seen.insert(peer.id));
+    if peers.len() < before {
+        warn!(
+            dropped = before - peers.len(),
+            "map response listed a peer node ID more than once; kept the first record"
+        );
     }
 }
 
