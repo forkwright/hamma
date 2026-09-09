@@ -28,6 +28,14 @@
 
 #![deny(missing_docs)]
 
+/// Client version string advertised to the control plane as
+/// `Hostinfo.GoVersion` (e.g. `"dictyon/0.3.0"`).
+///
+/// Derived from the crate version at build time so the advertised version
+/// always matches the release -- never restate the version as a literal at
+/// a call site.
+pub const ADVERTISED_VERSION: &str = concat!("dictyon/", env!("CARGO_PKG_VERSION"));
+
 pub mod control;
 pub mod error;
 pub mod noise;

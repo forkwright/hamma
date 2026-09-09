@@ -165,12 +165,18 @@ fn register_builds_correct_json() {
     let auth_key = auth["AuthKey"].as_str().expect("AuthKey should be string");
     assert_eq!(auth_key, "tskey-auth-test123");
 
-    // Hostinfo should have GoVersion set to dictyon.
+    // Hostinfo should advertise the crate version derived at build time.
     let hostinfo = &json["Hostinfo"];
+    let expected = format!("dictyon/{}", env!("CARGO_PKG_VERSION"));
     assert_eq!(
         hostinfo["GoVersion"].as_str(),
-        Some("dictyon/0.1.0"),
-        "GoVersion should identify dictyon"
+        Some(expected.as_str()),
+        "GoVersion must derive from CARGO_PKG_VERSION"
+    );
+    assert_eq!(
+        hostinfo["GoVersion"].as_str(),
+        Some(crate::ADVERTISED_VERSION),
+        "GoVersion must come from the shared ADVERTISED_VERSION constant"
     );
 }
 
