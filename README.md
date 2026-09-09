@@ -33,8 +33,8 @@ Hamma is a Rust-native mesh networking stack  -  the pieces needed to knot a set
 
 | Crate | Role | Status |
 |---|---|---|
-| `dictyon` (δίκτυον, "net") | Peer client: control transport, registration, map streaming, and the gated data-plane target | Phase A |
-| `mitos` | Shared types: Noise framing, WireGuard key types, peer identity, ACL types, protocol constants | Phase A |
+| `dictyon` (δίκτυον, "net") | Peer client: Noise-framed control transport, registration, map streaming, and the gated data-plane target | Phase A |
+| `mitos` | Shared types: WireGuard key types, peer identity, behavioral config, protocol constants | Phase A |
 | `histos` (ἱστός, "loom")  -  **planned** | Coordination server: peer registry, ACL enforcement, preauth keys, DERP coordination. Replaces Headscale/tailscale.com when sovereignty is wanted | Not started |
 | `hamma-derp`  -  **planned** | DERP relay server (optional  -  can reuse Tailscale's DERP for Phase A) | Not started |
 

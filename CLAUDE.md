@@ -1,7 +1,7 @@
 <!--
 scope: hamma repo conventions (pure-Rust mesh networking targeting Tailscale compatibility: dictyon, mitos, future histos)
 defers_to: ~/menos-ops/CLAUDE.md for machine topology; ~/.claude/CLAUDE.md for operator principles; kanon standards for universal engineering policy
-tightens: no-unsafe/no-unwrap discipline, boringtun as the only audited unsafe boundary
+tightens: no-unsafe/no-unwrap discipline, data plane gated behind contracts/phase-a.toml
 -->
 
 # CLAUDE.md
@@ -36,8 +36,8 @@ Lint before committing: `kanon lint . --summary`. Gate: `kanon gate`.
 ```
 hamma/
 ├── crates/
-│   ├── dictyon/        # peer client (headline crate, ships first)
-│   └── mitos/    # shared types (Noise framing, keys, ACL, protocol consts)
+│   ├── dictyon/        # peer client (Noise-framed control transport; headline crate, ships first)
+│   └── mitos/    # shared types (keys, peer identity, config, protocol consts)
 ├── .github/workflows/  # CI gates (installed by kanon init)
 ├── Cargo.toml          # workspace root
 ├── deny.toml           # dependency policy
@@ -68,9 +68,9 @@ kanon lint . --summary           # full kanon lint
 - **Error handling**: `snafu` with `.context()` propagation and `Location` tracking. No `anyhow`, no `thiserror`. See the RUST.md error handling section.
 - **Async runtime**: `tokio` with the actor-per-component pattern. No shared mutable state across async boundaries. `tokio::sync::Mutex` for async-locked data; `parking_lot::Mutex` for sync-only (never `std::sync::Mutex`  -  it deadlocks held across `.await`).
 - **Time**: `std::time::Instant` for monotonic time and `jiff` for wall-clock values when displayed to humans. Wall clock is never a dependency of correctness.
-- **Networking primitives**: `tokio::net` for TCP/UDP, `boringtun` (Cloudflare) for WireGuard data plane. No raw sockets, no nix crate, no libc. No reimplementation of WireGuard crypto  -  use the audited reference.
-- **Identity types**: ed25519 for node identity, Curve25519 for WireGuard tunnel keys, X25519 for Noise handshakes. Wrap each in a newtype to prevent accidental mixing. Types live in `mitos`.
-- **Configuration**: TOML files parsed via `figment` with env-var override cascade. See TOML.md in kanon standards.
+- **Networking primitives**: `tokio::net` for TCP/UDP. The WireGuard data plane is blocked behind the Phase A gates in `contracts/phase-a.toml`; when it activates, an audited external engine is the boundary. No raw sockets, no nix crate, no libc. No reimplementation of WireGuard crypto  -  use the audited reference.
+- **Identity types**: all keys are Curve25519/X25519 (`x25519-dalek`)  -  machine, node, and disco keys are one 32-byte key type, used for Noise handshakes and WireGuard tunnels alike. Each role is wrapped in a newtype (`MachinePrivate`, `NodePrivate`, `DiscoPrivate`, and the public counterparts) to prevent accidental mixing. Types live in `mitos::keys`.
+- **Configuration**: `mitos::config::Config`  -  serde-loaded TOML/JSON with per-field range validation; no cascade framework. See TOML.md in kanon standards.
 - **Logging**: `tracing` with structured fields. Never `println!` in library code. `tracing-subscriber` for the binary.
 - **No `unwrap()`, no `expect()` in library code**. Deny at workspace level. Tests may use `.expect("msg")` for clear assertion.
 - **No `unsafe`**. Workspace-wide deny. If a specific crate needs unsafe (unlikely until low-level protocol work), it goes in a clearly named module with per-block `// SAFETY:` comments and an allow attribute.

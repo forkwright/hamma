@@ -33,8 +33,8 @@ Source: [`contracts/phase-a.toml`](contracts/phase-a.toml). Regenerate with `pyt
 
 | Name | Role | Status |
 |---|---|---|
-| `dictyon` | Peer client: control transport, registration, map streaming, and eventually the gated data plane | Phase A |
-| `mitos` | Shared types: Noise framing, WireGuard key types, peer identity, ACL, protocol constants | Phase A |
+| `dictyon` | Peer client: Noise-framed control transport, registration, map streaming, and eventually the gated data plane | Phase A |
+| `mitos` | Shared types: WireGuard key types, peer identity, behavioral config, protocol constants | Phase A |
 | `histos` | Coordination server (planned) | Not started |
 | `hamma-derp` | DERP relay server (planned) | Not started |
 
