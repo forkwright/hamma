@@ -35,7 +35,9 @@ fn full_response_with(peers: Vec<Node>) -> MapResponse {
 fn apply_map_response_caps_the_initial_peer_list() {
     let mut client = paired_client();
 
-    client.apply_map_response(full_response_with(sample_peers(2, MAX_PEERS + 25)));
+    client
+        .apply_map_response(full_response_with(sample_peers(2, MAX_PEERS + 25)))
+        .expect("initial map response should apply");
 
     assert_eq!(
         client.peers().len(),
@@ -47,12 +49,16 @@ fn apply_map_response_caps_the_initial_peer_list() {
 #[test]
 fn apply_map_response_caps_a_full_peer_replacement() {
     let mut client = paired_client();
-    client.apply_map_response(full_response_with(sample_peers(2, 1)));
+    client
+        .apply_map_response(full_response_with(sample_peers(2, 1)))
+        .expect("initial map response should apply");
 
     // Delta re-sending the whole list, this time over the cap.
     let mut delta = full_response_with(sample_peers(2, MAX_PEERS + 25));
     delta.node = None;
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(
         client.peers().len(),
@@ -64,7 +70,9 @@ fn apply_map_response_caps_a_full_peer_replacement() {
 #[test]
 fn apply_map_response_refuses_peer_additions_at_the_cap() {
     let mut client = paired_client();
-    client.apply_map_response(full_response_with(sample_peers(2, MAX_PEERS)));
+    client
+        .apply_map_response(full_response_with(sample_peers(2, MAX_PEERS)))
+        .expect("initial map response should apply");
 
     // Every peer here is new, so each one is growth.
     let delta = MapResponse {
@@ -80,7 +88,9 @@ fn apply_map_response_refuses_peer_additions_at_the_cap() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(
         client.peers().len(),
@@ -92,7 +102,9 @@ fn apply_map_response_refuses_peer_additions_at_the_cap() {
 #[test]
 fn apply_map_response_updates_a_known_peer_at_the_cap() {
     let mut client = paired_client();
-    client.apply_map_response(full_response_with(sample_peers(2, MAX_PEERS)));
+    client
+        .apply_map_response(full_response_with(sample_peers(2, MAX_PEERS)))
+        .expect("initial map response should apply");
 
     // WHY: an update to a peer already held is not growth. Refusing it would
     // freeze the netmap's contents for as long as it sits at the cap, so this
@@ -110,7 +122,9 @@ fn apply_map_response_updates_a_known_peer_at_the_cap() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(client.peers().len(), MAX_PEERS);
     assert_eq!(

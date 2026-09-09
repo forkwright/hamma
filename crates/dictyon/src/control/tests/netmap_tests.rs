@@ -32,7 +32,9 @@ fn apply_map_response_sets_initial_peers() {
         keep_alive: None,
     };
 
-    client.apply_map_response(resp);
+    client
+        .apply_map_response(resp)
+        .expect("initial map response should apply");
 
     let self_node = client.self_node().expect("self_node should be set");
     assert_eq!(self_node.key, hex_node_key(1));
@@ -61,7 +63,9 @@ fn apply_map_response_delta_adds_peers() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
     assert_eq!(client.peers().len(), 1);
 
     // Delta: add a new peer and update existing one.
@@ -78,7 +82,9 @@ fn apply_map_response_delta_adds_peers() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(client.peers().len(), 2);
     // Existing peer should be updated.
@@ -107,7 +113,9 @@ fn apply_map_response_removes_peers() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
     assert_eq!(client.peers().len(), 3);
 
     // Delta: remove peer2 (id 3).
@@ -121,7 +129,9 @@ fn apply_map_response_removes_peers() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(client.peers().len(), 2);
     assert_eq!(client.peers()[0].key, hex_node_key(2));
@@ -146,7 +156,9 @@ fn apply_map_response_removes_peers_by_node_id() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
 
     let delta = MapResponse {
         node: None,
@@ -158,7 +170,9 @@ fn apply_map_response_removes_peers_by_node_id() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(client.peers().len(), 2);
     assert_eq!(client.peers()[0].id, 2);
@@ -179,7 +193,9 @@ fn apply_map_response_applies_peer_patch_to_known_peer() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
 
     // A rotated key/disco_key for peer id 2. Tag 1_002 is arbitrary -- it
     // does not correspond to any constructed Node, it just needs to be a
@@ -208,7 +224,9 @@ fn apply_map_response_applies_peer_patch_to_known_peer() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     let peer = &client.peers()[0];
     assert_eq!(peer.id, 2);
@@ -239,7 +257,9 @@ fn apply_map_response_ignores_peer_patch_for_unknown_peer() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
 
     let delta = MapResponse {
         node: None,
@@ -262,7 +282,9 @@ fn apply_map_response_ignores_peer_patch_for_unknown_peer() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(client.peers().len(), 1);
     let peer = &client.peers()[0];
@@ -293,7 +315,9 @@ fn apply_map_response_rejects_malformed_peer_patch_key() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
     let original_key = client.peers()[0].key.clone();
 
     let delta = MapResponse {
@@ -317,7 +341,9 @@ fn apply_map_response_rejects_malformed_peer_patch_key() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     let peer = &client.peers()[0];
     assert_eq!(
@@ -355,7 +381,9 @@ fn apply_map_response_drops_malformed_peer_from_initial_list() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(resp);
+    client
+        .apply_map_response(resp)
+        .expect("initial map response should apply");
 
     assert_eq!(
         client.peers().len(),
@@ -373,7 +401,9 @@ fn apply_map_response_drops_peer_with_malformed_routing_data_from_delta() {
     // failing (peer count == 2, garbage address present) before the fix and
     // passing (== 1) after.
     let mut client = paired_client();
-    client.apply_map_response(full_response_seed());
+    client
+        .apply_map_response(full_response_seed())
+        .expect("seed response should initialize the netmap");
 
     let mut bad_routing = sample_node(4, "peer3.ts.net.");
     bad_routing.addresses = vec!["definitely-not-an-ip/32".to_string()];
@@ -388,7 +418,9 @@ fn apply_map_response_drops_peer_with_malformed_routing_data_from_delta() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     assert_eq!(
         client.peers().len(),
@@ -398,13 +430,94 @@ fn apply_map_response_drops_peer_with_malformed_routing_data_from_delta() {
 }
 
 #[test]
-fn apply_map_response_falls_back_to_zero_value_self_node_when_malformed() {
+fn apply_map_response_rejects_initial_map_with_malformed_self_node() {
+    // WHY(negative fixture, issue #127): before the fix, a malformed initial
+    // self node silently initialized the netmap with a fabricated
+    // zero-value identity (ID 0, empty key). The self node anchors identity,
+    // addressing, and key-expiry state for everything downstream, so the
+    // initial map must fail closed instead.
     let mut client = paired_client();
 
     let mut malformed_self = sample_node(1, "self.ts.net.");
     malformed_self.key = "garbage".to_string();
 
     let resp = MapResponse {
+        node: Some(malformed_self),
+        peers: Some(vec![sample_node(2, "peer1.ts.net.")]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    let err = client
+        .apply_map_response(resp)
+        .expect_err("an initial map without a valid self node must be rejected");
+
+    assert!(
+        matches!(err, ControlError::InvalidInitialSelfNode { node_id: 1 }),
+        "expected InvalidInitialSelfNode naming the rejected node, got {err:?}"
+    );
+    assert!(
+        client.self_node().is_none(),
+        "a rejected initial map must leave the client uninitialized"
+    );
+    assert!(
+        client.peers().is_empty(),
+        "a rejected initial map must not admit its peers either"
+    );
+}
+
+#[test]
+fn apply_map_response_rejects_initial_map_without_self_node() {
+    // WHY(negative fixture, issue #127): an omitted `Node` is the other
+    // shape of "no valid self node" and must fail the same way rather than
+    // initialize a placeholder identity.
+    let mut client = paired_client();
+
+    let resp = MapResponse {
+        node: None,
+        peers: Some(vec![sample_node(2, "peer1.ts.net.")]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    let err = client
+        .apply_map_response(resp)
+        .expect_err("an initial map with no self node must be rejected");
+
+    assert!(
+        matches!(err, ControlError::MissingInitialSelfNode),
+        "expected MissingInitialSelfNode, got {err:?}"
+    );
+    assert!(
+        client.self_node().is_none(),
+        "a rejected initial map must leave the client uninitialized"
+    );
+    assert!(
+        client.peers().is_empty(),
+        "a rejected initial map must not admit its peers either"
+    );
+}
+
+#[test]
+fn apply_map_response_preserves_self_node_when_delta_self_is_malformed() {
+    // WHY(issue #127): delta semantics intentionally differ from the initial
+    // map -- once a valid identity exists, a malformed later self update is
+    // dropped with that identity preserved, rather than failing the update.
+    let mut client = paired_client();
+    client
+        .apply_map_response(full_response_seed())
+        .expect("seed response should initialize the netmap");
+
+    let mut malformed_self = sample_node(1, "self-renamed.ts.net.");
+    malformed_self.key = "garbage".to_string();
+
+    let delta = MapResponse {
         node: Some(malformed_self),
         peers: None,
         peers_changed: None,
@@ -414,12 +527,200 @@ fn apply_map_response_falls_back_to_zero_value_self_node_when_malformed() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(resp);
+    client
+        .apply_map_response(delta)
+        .expect("a malformed delta self node is dropped, not an error");
 
-    let self_node = client.self_node().expect("netmap should still initialize");
+    let self_node = client.self_node().expect("netmap should stay initialized");
     assert_eq!(
-        self_node.key, "",
-        "a malformed self node must fall back to the zero-value node, not be admitted verbatim"
+        self_node.key,
+        hex_node_key(1),
+        "the previously validated self node must survive a malformed delta update"
+    );
+    assert_eq!(
+        self_node.name, "self.ts.net.",
+        "no field of the malformed delta self node may leak into the stored identity"
+    );
+}
+
+#[test]
+fn apply_map_response_peers_changed_replaces_rotated_key_without_duplicating() {
+    // WHY(issue #126): a key rotation delivered as a full PeersChanged
+    // record carries the same node ID with a new key. Matching by key would
+    // append a second record and retain the stale key; matching by node ID
+    // replaces the one canonical record, as the reference implementation's
+    // NodeID-keyed peer map does.
+    let mut client = paired_client();
+    client
+        .apply_map_response(full_response_seed())
+        .expect("seed response should initialize the netmap");
+    assert_eq!(client.peers().len(), 1);
+
+    let mut rotated = sample_node(2, "peer1.ts.net.");
+    rotated.key = hex_node_key(1_002);
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: Some(vec![rotated]),
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
+
+    assert_eq!(
+        client.peers().len(),
+        1,
+        "a key rotation must replace the peer record, not add a duplicate"
+    );
+    assert_eq!(client.peers()[0].id, 2);
+    assert_eq!(
+        client.peers()[0].key,
+        hex_node_key(1_002),
+        "the rotated key must replace the stale key on the same record"
+    );
+
+    // The rotated peer stays addressable by node ID for a later removal.
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: Some(vec![PeerRemoval::NodeId(2)]),
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
+    assert!(
+        client.peers().is_empty(),
+        "the rotated peer must be removable by node ID"
+    );
+}
+
+#[test]
+fn apply_map_response_peer_patch_with_empty_endpoints_clears_them() {
+    // WHY(issue #126): an explicitly empty `Endpoints` list is the control
+    // plane revoking every previously advertised direct endpoint -- it must
+    // clear the stored list, not collapse into "unchanged".
+    let mut client = paired_client();
+
+    let mut peer = sample_node(2, "peer1.ts.net.");
+    peer.endpoints = Some(vec!["203.0.113.10:41641".to_string()]);
+    let initial = MapResponse {
+        node: Some(sample_node(1, "self.ts.net.")),
+        peers: Some(vec![peer]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
+    assert_eq!(
+        client.peers()[0].endpoints.as_deref(),
+        Some(["203.0.113.10:41641".to_string()].as_slice()),
+        "the fixture must start with an advertised endpoint"
+    );
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: Some(vec![PeerChange {
+            node_id: 2,
+            derp_region: None,
+            cap: None,
+            cap_map: None,
+            endpoints: Some(Vec::new()),
+            key: None,
+            disco_key: None,
+            online: None,
+            last_seen: None,
+            key_expiry: None,
+        }]),
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
+
+    assert_eq!(
+        client.peers()[0].endpoints,
+        Some(Vec::new()),
+        "an explicitly empty endpoint list must clear the stored endpoints"
+    );
+}
+
+#[test]
+fn apply_map_response_peer_patch_without_endpoints_preserves_them() {
+    // WHY(issue #126): tri-state patch semantics -- an omitted `Endpoints`
+    // field means "unchanged" and is distinct from an explicitly empty list.
+    let mut client = paired_client();
+
+    let mut peer = sample_node(2, "peer1.ts.net.");
+    peer.endpoints = Some(vec!["203.0.113.10:41641".to_string()]);
+    let initial = MapResponse {
+        node: Some(sample_node(1, "self.ts.net.")),
+        peers: Some(vec![peer]),
+        peers_changed: None,
+        peers_changed_patch: None,
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
+
+    let delta = MapResponse {
+        node: None,
+        peers: None,
+        peers_changed: None,
+        peers_changed_patch: Some(vec![PeerChange {
+            node_id: 2,
+            derp_region: None,
+            cap: None,
+            cap_map: None,
+            endpoints: None,
+            key: None,
+            disco_key: None,
+            online: Some(true),
+            last_seen: None,
+            key_expiry: None,
+        }]),
+        peers_removed: None,
+        dns_config: None,
+        derp_map: None,
+        keep_alive: None,
+    };
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
+
+    assert_eq!(
+        client.peers()[0].endpoints.as_deref(),
+        Some(["203.0.113.10:41641".to_string()].as_slice()),
+        "an omitted endpoint field must leave the stored endpoints unchanged"
+    );
+    assert_eq!(
+        client.peers()[0].online,
+        Some(true),
+        "the rest of the patch must still apply"
     );
 }
 
@@ -447,7 +748,9 @@ fn apply_map_response_drops_malformed_dns_resolver() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(resp);
+    client
+        .apply_map_response(resp)
+        .expect("initial map response should apply");
 
     let netmap = client.netmap.as_ref().expect("netmap should exist");
     let resolvers = netmap
@@ -495,7 +798,9 @@ fn keepalive_does_not_modify_netmap() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
     assert_eq!(client.peers().len(), 1);
 
     // Keepalive should not change anything.
@@ -509,7 +814,9 @@ fn keepalive_does_not_modify_netmap() {
         derp_map: None,
         keep_alive: Some(true),
     };
-    client.apply_map_response(keepalive);
+    client
+        .apply_map_response(keepalive)
+        .expect("keepalive should apply");
 
     assert_eq!(client.peers().len(), 1);
     assert_eq!(client.peers()[0].key, hex_node_key(2));
@@ -523,7 +830,8 @@ proptest::proptest! {
     #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
 
     /// After any sequence of delta updates the peer list has no duplicate
-    /// keys and every explicitly removed key is absent.
+    /// keys, no duplicate node IDs, and every explicitly removed key is
+    /// absent.
     #[test]
     fn netmap_delta_sequence_is_consistent(
         // Number of initial peers: 1..=8
@@ -553,7 +861,7 @@ proptest::proptest! {
             derp_map: None,
             keep_alive: None,
         };
-        client.apply_map_response(initial);
+        client.apply_map_response(initial).expect("initial map response should apply");
         assert_eq!(client.peers().len(), n_initial);
 
         // Add new peers via peers_changed.
@@ -575,7 +883,7 @@ proptest::proptest! {
                 derp_map: None,
                 keep_alive: None,
             };
-            client.apply_map_response(delta);
+            client.apply_map_response(delta).expect("delta should apply");
             assert_eq!(client.peers().len(), n_initial + n_add);
         }
 
@@ -601,7 +909,7 @@ proptest::proptest! {
                 derp_map: None,
                 keep_alive: None,
             };
-            client.apply_map_response(delta);
+            client.apply_map_response(delta).expect("delta should apply");
         }
 
         let final_peers = client.peers();
@@ -617,6 +925,15 @@ proptest::proptest! {
         for peer in final_peers {
             let is_new = seen_keys.insert(peer.key.clone());
             assert!(is_new, "duplicate peer key found: {}", peer.key);
+        }
+
+        // Invariant (issue #126): no duplicate node IDs -- the netmap keeps
+        // one live record per node ID, the identity patches and removals
+        // address.
+        let mut seen_ids = std::collections::HashSet::new();
+        for peer in final_peers {
+            let is_new = seen_ids.insert(peer.id);
+            assert!(is_new, "duplicate peer node ID found: {}", peer.id);
         }
 
         // Invariant: all removed keys are absent.
@@ -651,7 +968,9 @@ fn apply_map_response_removes_peers_named_by_either_identifier_in_one_delta() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(initial);
+    client
+        .apply_map_response(initial)
+        .expect("initial map response should apply");
     assert_eq!(client.peers().len(), 4);
 
     let delta = MapResponse {
@@ -670,7 +989,9 @@ fn apply_map_response_removes_peers_named_by_either_identifier_in_one_delta() {
         derp_map: None,
         keep_alive: None,
     };
-    client.apply_map_response(delta);
+    client
+        .apply_map_response(delta)
+        .expect("delta should apply");
 
     let remaining: Vec<String> = client.peers().iter().map(|p| p.key.clone()).collect();
     assert_eq!(
