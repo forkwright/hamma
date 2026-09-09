@@ -6,9 +6,10 @@ and the success/mismatch case outcomes. The phase-a contract's completion
 authority validates against this receipt shape."""
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,8 +38,11 @@ def main() -> int:
         print("mismatch case completed the handshake (must be refused)", file=sys.stderr)
         return 1
 
+    engine = os.environ.get("HAMMA_ORACLE_ENGINE") or (
+        "podman" if shutil.which("podman") else "docker"
+    )
     digest = subprocess.run(
-        ["podman", "image", "inspect", image, "--format", "{{.Digest}}"],
+        [engine, "image", "inspect", image, "--format", "{{.Digest}}"],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
     commit = subprocess.run(
