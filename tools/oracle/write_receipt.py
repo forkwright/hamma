@@ -41,10 +41,21 @@ def main() -> int:
     engine = os.environ.get("HAMMA_ORACLE_ENGINE") or (
         "podman" if shutil.which("podman") else "docker"
     )
-    digest = subprocess.run(
-        [engine, "image", "inspect", image, "--format", "{{.Digest}}"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
+    # WHY the fallback chain: podman exposes .Digest; docker's local inspect
+    # answers RepoDigests for pulled images and .Id always. All three are
+    # content-addressed identities of the oracle image.
+    digest = ""
+    for fmt in ("{{.Digest}}", "{{index .RepoDigests 0}}", "{{.Id}}"):
+        probe = subprocess.run(
+            [engine, "image", "inspect", image, "--format", fmt],
+            capture_output=True, text=True,
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            digest = probe.stdout.strip()
+            break
+    if not digest:
+        print(f"could not resolve image digest for {image} via {engine}", file=sys.stderr)
+        return 1
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
     ).stdout.strip()

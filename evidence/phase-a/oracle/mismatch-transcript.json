@@ -2,7 +2,7 @@
   "capability_version": 71,
   "case": "mismatch",
   "handshake_completed": false,
-  "initiation_hex": "6aed9757d9ac9897d216f39f6353e88fce8de2a5976db7bf4f30b00702c0c30498360521efc1cfac6914d4e3e7bce6f901e223f51e6028d309b28f3586c25ceafc54da30471123f3ed9a16c5a82cb27afc146876a2c337353b8bc36e43e003a8",
+  "initiation_hex": "a5e1c2be7d311dd66f91929df753945e00d9812b10ed352a08d5e2066141774d1166a6ab9a958cbf96e94e794b4c7402f58604b570175971b52b4a02971c9e0d76beced610bbcaf5ffc94e8c5a274de84a031f166d30159930f1feac058a1774",
   "noise_response_hex": "",
   "prologue": "Tailscale Control Protocol v71",
   "upgrade_accepted": true,
