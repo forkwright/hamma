@@ -24,22 +24,24 @@ layers = [
 [[architecture.crates]]
 name = "mitos"
 path = "crates/mitos"
-role = "Shared Noise framing, WireGuard key types, peer identity, ACL types, and protocol constants."
+role = "Shared WireGuard key types, peer identity types, behavioral configuration, and protocol constants. Noise framing lives in dictyon."
 
 [[architecture.crates]]
 name = "dictyon"
 path = "crates/dictyon"
-role = "Peer client: control protocol, registration, map streaming, and planned WireGuard data plane."
+role = "Peer client: Noise-framed control protocol, registration, map streaming, and planned gated WireGuard data plane."
 
 [[architecture.crates]]
 name = "histos"
 path = "crates/histos"
-role = "Planned coordination server replacing tailscale.com when sovereignty is wanted."
+status = "planned"
+role = "Planned coordination server replacing tailscale.com when sovereignty is wanted. Path does not exist yet."
 
 [[architecture.crates]]
 name = "hamma-derp"
 path = "crates/hamma-derp"
-role = "Planned optional DERP relay server."
+status = "planned"
+role = "Planned optional DERP relay server. Path does not exist yet."
 
 [[interfaces]]
 name = "dictyon client"
