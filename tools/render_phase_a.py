@@ -618,6 +618,19 @@ def dependency_identities(manifest: dict[str, Any]) -> set[str]:
     return identities
 
 
+def tracked_files() -> list[str]:
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        env=git_environment(),
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise ContractError("git ls-files must succeed in this Hamma git worktree")
+    return [os.fsdecode(entry) for entry in listing.stdout.split(b"\0") if entry]
+
+
 def validate_blocked_data_plane(data_plane: dict[str, Any]) -> None:
     reserved_paths = require_string_list(data_plane, "reserved_paths", "data-plane")
     forbidden_packages = set(
@@ -633,27 +646,35 @@ def validate_blocked_data_plane(data_plane: dict[str, Any]) -> None:
                 f"data-plane is blocked but reserved activation path exists: {relative}"
             )
 
-    for manifest_path in ROOT.rglob("Cargo.toml"):
-        relative_manifest = manifest_path.relative_to(ROOT)
-        if ".git" in relative_manifest.parts or relative_manifest.parts[0] == "target":
+    # WHY tracked enumeration: a force-added path under target/ is still scanned,
+    # so the build-cache directory cannot smuggle a data-plane activation (#125).
+    tracked = tracked_files()
+
+    for relative in tracked:
+        if PurePosixPath(relative).name != "Cargo.toml":
+            continue
+        manifest_path = ROOT / relative
+        if not manifest_path.is_file():
             continue
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
         forbidden = dependency_identities(manifest) & forbidden_packages
         if forbidden:
             names = ", ".join(sorted(forbidden))
             raise ContractError(
-                f"data-plane is blocked but {relative_manifest} activates {names}"
+                f"data-plane is blocked but {relative} activates {names}"
             )
 
-    for source_path in ROOT.rglob("*.rs"):
-        relative_source = source_path.relative_to(ROOT)
-        if ".git" in relative_source.parts or relative_source.parts[0] == "target":
+    for relative in tracked:
+        if not relative.endswith(".rs"):
+            continue
+        source_path = ROOT / relative
+        if not source_path.is_file():
             continue
         source = source_path.read_text(encoding="utf-8")
         for token in forbidden_tokens:
             if token in source:
                 raise ContractError(
-                    f"data-plane is blocked but {relative_source} contains {token!r}"
+                    f"data-plane is blocked but {relative} contains {token!r}"
                 )
 
 
