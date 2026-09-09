@@ -342,6 +342,7 @@ class PhaseAContractTests(unittest.TestCase):
         source.write_text(
             "fn early() { let _ = boringtun::noise::Tunn::new; }\n", encoding="utf-8"
         )
+        self.run_git("add", source.relative_to(self.root).as_posix())
         self.assert_rejected("contains 'boringtun::'")
 
     def test_nested_target_manifest_cannot_hide_data_plane_dependency(self) -> None:
@@ -357,6 +358,27 @@ class PhaseAContractTests(unittest.TestCase):
 
     def test_nested_target_source_cannot_hide_reserved_token(self) -> None:
         source = self.root / "crates/dictyon/src/target/early.rs"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "fn early() { let _ = boringtun::noise::Tunn::new; }\n",
+            encoding="utf-8",
+        )
+        self.run_git("add", "--force", source.relative_to(self.root).as_posix())
+        self.assert_rejected("contains 'boringtun::'")
+
+    def test_tracked_target_manifest_cannot_smuggle_data_plane_dependency(self) -> None:
+        manifest = self.root / "target/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            '[package]\nname = "smuggled-target-manifest"\nversion = "0.0.0"\n'
+            '\n[dependencies]\nboringtun = "0.6"\n',
+            encoding="utf-8",
+        )
+        self.run_git("add", "--force", manifest.relative_to(self.root).as_posix())
+        self.assert_rejected("activates boringtun")
+
+    def test_tracked_target_source_cannot_smuggle_reserved_token(self) -> None:
+        source = self.root / "target/early.rs"
         source.parent.mkdir(parents=True)
         source.write_text(
             "fn early() { let _ = boringtun::noise::Tunn::new; }\n",
