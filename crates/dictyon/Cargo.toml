@@ -24,6 +24,7 @@ zstd = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 rcgen = "0.14"
+rustls-pemfile = "2"
 koinon = { workspace = true }
 zeroize = { workspace = true }
 

@@ -1,0 +1,28 @@
+name: oracle
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ts2021-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@8eade2e0234f2aebde1d4b7b5e2cd0b4d36b1e80 # v6.0.0
+      - uses: dtolnay/rust-toolchain@e6907f674373fc4c95f16483771646bb8cf4adcc # master
+        with:
+          toolchain: 1.97.1
+      - name: Run the headscale oracle harness
+        run: tools/oracle/run.sh evidence/phase-a/oracle
+        env:
+          HAMMA_ORACLE_ENGINE: docker
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: oracle-evidence
+          path: evidence/phase-a/oracle/
+          if-no-files-found: error

@@ -416,7 +416,7 @@ pub(super) async fn read_full_response(
     Ok(buf)
 }
 
-/// Parse `{"PublicKey":"mkey:hex..."}` from the raw HTTP response bytes.
+/// Parse the server key JSON (`publicKey` or legacy `PublicKey` spelling) from the raw HTTP response bytes.
 pub(super) fn parse_server_key_response(response: &[u8]) -> Result<MachinePublic, WireError> {
     // Find the JSON body after the headers.
     let sep = b"\r\n\r\n";
@@ -435,11 +435,14 @@ pub(super) fn parse_server_key_response(response: &[u8]) -> Result<MachinePublic
             message: e.to_string(),
         })?;
 
-    let key_str = json
-        .get("PublicKey")
-        .and_then(|v| v.as_str())
+    // WHY two spellings: the live wire uses lowercase camelCase ("publicKey",
+    // headscale and current tailscale.com), while older reference docs show
+    // "PublicKey". Accept both; prefer the wire-standard lowercase.
+    let key_str = ["publicKey", "PublicKey"]
+        .iter()
+        .find_map(|field| json.get(field).and_then(|v| v.as_str()))
         .ok_or_else(|| WireError::KeyParse {
-            message: "missing 'PublicKey' field".to_string(),
+            message: "missing 'publicKey' field".to_string(),
         })?;
 
     MachinePublic::from_hex(key_str).context(ServerKeySnafu)

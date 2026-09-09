@@ -306,6 +306,18 @@ fn parse_server_key_response_extracts_key() {
     assert_eq!(key.as_bytes(), &[0u8; 32]);
 }
 
+/// The live wire (headscale, current tailscale.com) spells the field
+/// `publicKey`; the legacy `PublicKey` spelling must keep parsing.
+#[test]
+fn parse_server_key_response_accepts_lowercase_wire_spelling() {
+    let hex = "0".repeat(64);
+    let json_body = format!(r#"{{"publicKey":"mkey:{hex}"}}"#);
+    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{json_body}");
+
+    let key = parse_server_key_response(response.as_bytes()).expect("should parse");
+    assert_eq!(key.as_bytes(), &[0u8; 32]);
+}
+
 #[test]
 fn parse_server_key_response_missing_field_errors() {
     let response = b"HTTP/1.1 200 OK\r\n\r\n{}";
