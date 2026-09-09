@@ -57,11 +57,18 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn tls_config_trusting(ca_pem: &str) -> Result<rustls::ClientConfig, String> {
-    let pem = std::fs::read(ca_pem).map_err(|e| format!("read {ca_pem}: {e}"))?;
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut &pem[..])
-        .collect::<Result<_, _>>()
-        .map_err(|e| format!("parse {ca_pem}: {e}"))?;
+    let pem_text = std::fs::read_to_string(ca_pem).map_err(|e| format!("read {ca_pem}: {e}"))?;
     let mut roots = rustls::RootCertStore::empty();
+    let mut certs = Vec::new();
+    for block in pem_text.split("-----END CERTIFICATE-----") {
+        let Some((_, b64)) = block.split_once("-----BEGIN CERTIFICATE-----") else {
+            continue;
+        };
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(b64.replace(['\r', '\n', ' '], ""))
+            .map_err(|e| format!("base64 in {ca_pem}: {e}"))?;
+        certs.push(CertificateDer::from(der));
+    }
     for cert in certs {
         roots
             .add(cert)

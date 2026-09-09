@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@8eade2e0234f2aebde1d4b7b5e2cd0b4d36b1e80 # v6.0.0
-      - uses: dtolnay/rust-toolchain@e6907f674373fc4c95f16483771646bb8cf4adcc # master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           toolchain: 1.97.1
       - name: Run the headscale oracle harness
