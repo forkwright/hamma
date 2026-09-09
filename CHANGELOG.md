@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/forkwright/hamma/compare/v0.3.0...v0.4.0) (2026-09-09)
+
+
+### Features
+
+* **dictyon:** wire DictyonError as the public async API error surface ([#142](https://github.com/forkwright/hamma/issues/142)) ([ac53b0d](https://github.com/forkwright/hamma/commit/ac53b0d10c94bbd88c68d9bd56315d3b50d9d2d4))
+* **oracle:** independent TS2021 handshake oracle + receipt tooling ([#145](https://github.com/forkwright/hamma/issues/145)) ([aa212b9](https://github.com/forkwright/hamma/commit/aa212b95cbf4fcb0b5773110c19c2e590ea30748))
+
+
+### Bug Fixes
+
+* **dictyon:** derive advertised version string from CARGO_PKG_VERSION ([#141](https://github.com/forkwright/hamma/issues/141)) ([2d9ab9d](https://github.com/forkwright/hamma/commit/2d9ab9d5398a06d80c47de0f170f1264c15fec41))
+* **dictyon:** index netmap peers by node ID, reject invalid initial self node ([#143](https://github.com/forkwright/hamma/issues/143)) ([dec93f5](https://github.com/forkwright/hamma/commit/dec93f5d49c7772cf8753ce81592c9727c47d007))
+* **tools:** close target/ smuggling hole in phase-a data-plane scan ([#138](https://github.com/forkwright/hamma/issues/138)) ([ae81c56](https://github.com/forkwright/hamma/commit/ae81c56344d9420a00b726b43db44b95a08f3bdf))
+
+
+### Documentation
+
+* reconcile agent and architecture docs with the live tree ([#140](https://github.com/forkwright/hamma/issues/140)) ([fad10bd](https://github.com/forkwright/hamma/commit/fad10bdac427528f9dff3a54f46797cb73904dbf))
+
 ## [0.3.0](https://github.com/forkwright/hamma/compare/v0.2.0...v0.3.0) (2026-09-03)
 
 
