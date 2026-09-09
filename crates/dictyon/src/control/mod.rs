@@ -26,6 +26,7 @@ use mitos::types::{
 use snafu::Snafu;
 use tracing::{debug, warn};
 
+use crate::error::DictyonError;
 use crate::transport::ControlConnection;
 use crate::wire::AsyncControlStream;
 
@@ -212,9 +213,12 @@ impl ControlClient {
     /// combination the server can send, including ones the protocol does
     /// not allow, lands in a variant of that type.
     ///
+    /// This is part of the crate's public async API and returns the unified
+    /// [`DictyonError`] facade.
+    ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on serialization, I/O, or a JSON payload
+    /// Returns [`DictyonError`] on serialization, I/O, or a JSON payload
     /// that fails to parse. A syntactically valid response the protocol
     /// still rejects -- an explicit rejection, contradictory fields, an
     /// expired key -- is not an error here; it is a [`RegisterOutcome`]
@@ -223,7 +227,7 @@ impl ControlClient {
         &mut self,
         stream: &mut AsyncControlStream,
         auth_key: Option<&str>,
-    ) -> Result<RegisterOutcome, ControlError> {
+    ) -> Result<RegisterOutcome, DictyonError> {
         debug!(
             target: "dictyon::control",
             has_auth_key = auth_key.is_some(),
@@ -250,12 +254,12 @@ impl ControlClient {
     ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on serialization, I/O, or parse failure.
+    /// Returns [`DictyonError`] on serialization, I/O, or parse failure.
     pub async fn poll_registration(
         &mut self,
         stream: &mut AsyncControlStream,
         followup_url: &str,
-    ) -> Result<RegisterOutcome, ControlError> {
+    ) -> Result<RegisterOutcome, DictyonError> {
         debug!(
             target: "dictyon::control",
             followup_url,
@@ -269,7 +273,7 @@ impl ControlClient {
             hostinfo: self.hostinfo(),
             followup: Some(followup_url.to_string()),
         };
-        let payload = serde_json::to_vec(&req)?;
+        let payload = serde_json::to_vec(&req).map_err(ControlError::from)?;
         let framed = frame_message(&payload)?;
         stream.send_message(&framed).await?;
 
@@ -288,11 +292,11 @@ impl ControlClient {
     ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on serialization or I/O failure.
+    /// Returns [`DictyonError`] on serialization or I/O failure.
     pub async fn start_map_stream(
         &mut self,
         stream: &mut AsyncControlStream,
-    ) -> Result<(), ControlError> {
+    ) -> Result<(), DictyonError> {
         debug!(
             target: "dictyon::control",
             "sending streaming map request",
@@ -310,14 +314,14 @@ impl ControlClient {
     ///
     /// # Errors
     ///
-    /// Returns [`ControlError`] on I/O or parse failure, or when the first
+    /// Returns [`DictyonError`] on I/O or parse failure, or when the first
     /// non-keepalive response carries no valid self node (see
     /// [`Self::apply_map_response`]) -- in that case the client is left
     /// uninitialized rather than running on a fabricated identity.
     pub async fn recv_map_update(
         &mut self,
         stream: &mut AsyncControlStream,
-    ) -> Result<bool, ControlError> {
+    ) -> Result<bool, DictyonError> {
         let raw = stream.recv_message().await?;
         let resp = Self::parse_map_response(&raw)?;
         let is_keepalive = resp.keep_alive == Some(true);

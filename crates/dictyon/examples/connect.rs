@@ -9,10 +9,11 @@
 //! TS_AUTHKEY=tskey-auth-... cargo run --example connect
 //! ```
 
-use dictyon::control::{ControlClient, ControlError, RegisterOutcome};
-use dictyon::noise::{NoiseError, NoiseHandshake};
-use dictyon::transport::{ControlConnection, TransportError};
-use dictyon::wire::{AsyncControlStream, ControlConfig, WireError, connect};
+use dictyon::DictyonError;
+use dictyon::control::{ControlClient, RegisterOutcome};
+use dictyon::noise::NoiseHandshake;
+use dictyon::transport::ControlConnection;
+use dictyon::wire::{AsyncControlStream, ControlConfig, connect};
 use koinon::telemetry;
 use mitos::capability::CAPABILITY_VERSION;
 use mitos::keys::{DiscoPrivate, MachinePrivate, NodePrivate};
@@ -22,34 +23,18 @@ use zeroize::Zeroizing;
 
 const CONTROL_URL: &str = "https://controlplane.tailscale.com";
 
-/// Concrete error type for this example. Each variant identifies the stage
-/// that failed so diagnostics stay specific without leaking internal types.
+/// Concrete error type for this example. The public async API surfaces as
+/// the crate's unified [`DictyonError`]; only the placeholder-connection
+/// setup, which is example scaffolding rather than part of that flow, keeps
+/// its own variant.
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
 enum ExampleError {
-    /// Wire-level error (TLS / HTTP upgrade / transport framing).
-    #[snafu(display("wire layer: {source}"))]
-    Wire {
-        /// Underlying wire error.
-        source: WireError,
-    },
-    /// Noise handshake error.
-    #[snafu(display("noise handshake: {source}"))]
-    Noise {
-        /// Underlying Noise error.
-        source: NoiseError,
-    },
-    /// Control-plane protocol error (register / map stream).
-    #[snafu(display("control protocol: {source}"))]
-    Control {
-        /// Underlying control error.
-        source: ControlError,
-    },
-    /// Control-connection transport error.
-    #[snafu(display("transport layer: {source}"))]
-    Transport {
-        /// Underlying transport error.
-        source: TransportError,
+    /// An error from dictyon's public async API.
+    #[snafu(display("dictyon API: {source}"))]
+    Dictyon {
+        /// The unified dictyon error.
+        source: DictyonError,
     },
     /// Failed to build the placeholder Noise responder for the placeholder
     /// `ControlConnection`.
@@ -60,27 +45,9 @@ enum ExampleError {
     },
 }
 
-impl From<WireError> for ExampleError {
-    fn from(source: WireError) -> Self {
-        Self::Wire { source }
-    }
-}
-
-impl From<ControlError> for ExampleError {
-    fn from(source: ControlError) -> Self {
-        Self::Control { source }
-    }
-}
-
-impl From<NoiseError> for ExampleError {
-    fn from(source: NoiseError) -> Self {
-        Self::Noise { source }
-    }
-}
-
-impl From<TransportError> for ExampleError {
-    fn from(source: TransportError) -> Self {
-        Self::Transport { source }
+impl From<DictyonError> for ExampleError {
+    fn from(source: DictyonError) -> Self {
+        Self::Dictyon { source }
     }
 }
 
@@ -149,7 +116,7 @@ async fn register_node(
     client: &mut ControlClient,
     stream: &mut AsyncControlStream,
     auth_key: Option<&str>,
-) -> Result<(), ExampleError> {
+) -> Result<(), DictyonError> {
     info!("registering…");
     match client.register(stream, auth_key).await? {
         RegisterOutcome::NeedsAuth(url) => {
@@ -199,7 +166,7 @@ fn report_register_outcome(outcome: RegisterOutcome) {
 async fn stream_map(
     client: &mut ControlClient,
     stream: &mut AsyncControlStream,
-) -> Result<(), ExampleError> {
+) -> Result<(), DictyonError> {
     info!("starting map stream…");
     client.start_map_stream(stream).await?;
 
@@ -228,7 +195,12 @@ fn build_placeholder_connection() -> Result<ControlConnection, ExampleError> {
     let server_pub = server_key.public_key();
 
     let mut handshake = NoiseHandshake::new(client_key, server_pub);
-    let init_msg = handshake.initiation_message()?;
+    let init_msg =
+        handshake
+            .initiation_message()
+            .map_err(|e| ExampleError::PlaceholderHandshake {
+                message: format!("noise initiation: {e}"),
+            })?;
 
     let params: snow::params::NoiseParams =
         "Noise_IK_25519_ChaChaPoly_BLAKE2s"
@@ -298,10 +270,11 @@ fn build_placeholder_connection() -> Result<ControlConnection, ExampleError> {
             })?;
     framed_resp.extend_from_slice(resp_slice);
 
-    Ok(ControlConnection::complete_handshake(
-        handshake,
-        &framed_resp,
-    )?)
+    ControlConnection::complete_handshake(handshake, &framed_resp).map_err(|e| {
+        ExampleError::PlaceholderHandshake {
+            message: format!("complete handshake: {e}"),
+        }
+    })
 }
 
 /// Adapter from raw `snow::Error` through [`ExampleError::PlaceholderHandshake`].

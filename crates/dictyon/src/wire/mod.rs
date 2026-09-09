@@ -30,6 +30,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tracing::debug;
 
+use crate::error::DictyonError;
 use crate::transport::ControlConnection;
 
 // ---------------------------------------------------------------------------
@@ -411,19 +412,24 @@ async fn fetch_server_key_with_config_inner(
 /// Connect to the control server, complete the Noise IK handshake, and
 /// return an [`AsyncControlStream`] ready for control messages.
 ///
+/// This is the connection entry point of the crate's public async API; it
+/// returns the unified [`DictyonError`] facade. Use [`connect_with_tls`]
+/// when a caller-supplied TLS configuration or the layer-specific
+/// [`WireError`] contract is required.
+///
 /// Uses the tuning knobs on `config.config`. Default-construct `ControlConfig`
 /// with [`Config::default`] to match pre-config behavior.
 ///
 /// # Errors
 ///
-/// Returns [`WireError`] on any I/O, TLS, HTTP, or Noise failure.
-pub async fn connect(config: &ControlConfig) -> Result<AsyncControlStream, WireError> {
+/// Returns [`DictyonError::Wire`] on any I/O, TLS, HTTP, or Noise failure.
+pub async fn connect(config: &ControlConfig) -> Result<AsyncControlStream, DictyonError> {
     debug!(
         target: "dictyon::wire",
         "connecting to control server",
     );
     let server_key = fetch_server_key_with_config(&config.control_url, &config.config.wire).await?;
-    support::connect_with_key(config, server_key).await
+    Ok(support::connect_with_key(config, server_key).await?)
 }
 
 /// Connect with a custom [`ClientConfig`], bypassing the default webpki roots.

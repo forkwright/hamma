@@ -41,3 +41,5 @@ pub mod error;
 pub mod noise;
 pub mod transport;
 pub mod wire;
+
+pub use error::DictyonError;
