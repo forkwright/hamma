@@ -431,7 +431,7 @@ impl ControlClient {
             backend_log_id: BackendLogId::new(String::new()),
             os: std::env::consts::OS.to_string(),
             hostname,
-            go_version: "dictyon/0.1.0".to_string(),
+            go_version: crate::ADVERTISED_VERSION.to_string(),
         }
     }
 }

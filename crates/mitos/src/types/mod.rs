@@ -159,7 +159,8 @@ pub struct Hostinfo {
     pub hostname: String,
 
     /// Client implementation version. Tailscale sends a Go version string;
-    /// dictyon sends `"dictyon/0.1.0"`.
+    /// dictyon sends `"dictyon/<version>"` derived from
+    /// `CARGO_PKG_VERSION` at build time (see `dictyon::ADVERTISED_VERSION`).
     #[serde(rename = "GoVersion")]
     pub go_version: String,
 }
