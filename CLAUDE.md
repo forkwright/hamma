@@ -1,6 +1,6 @@
 <!--
 scope: hamma repo conventions (pure-Rust mesh networking targeting Tailscale compatibility: dictyon, mitos, future histos)
-defers_to: ~/menos-ops/CLAUDE.md for machine topology; ~/.claude/CLAUDE.md for operator principles; kanon standards for universal engineering policy
+defers_to: kanon standards for universal engineering policy; host and environment conventions live outside this repository
 tightens: no-unsafe/no-unwrap discipline, data plane gated behind contracts/phase-a.toml
 -->
 
