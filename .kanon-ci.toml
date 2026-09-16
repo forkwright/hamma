@@ -6,12 +6,15 @@
 #
 # Prepends the public Phase A contract check to the hardcoded default Rust
 # gate (fmt → check → clippy → nextest → lint), then pins per-stage build and
-# test concurrency to 8. Without this
-# cap, cargo defaults to num_cpus (64 on this Threadripper) and parallel
-# rustc + nextest processes peak well over 100GB of RSS — enough to OOM
-# menos when any other fleet work is running. 8 is the budget that keeps
-# a single CI run under ~25GB peak, low enough that serial drains don't
-# OOM even with aletheia.service and the dispatch fleet resident.
+# test concurrency to 8. The pin is a memory bound, not a speed knob: this
+# workspace's parallel rustc and nextest processes are RSS-heavy and peak
+# memory scales with the job count. 8 is the calibrated value that holds a
+# single run under ~25GB peak, which is what leaves headroom for anything
+# else resident on the build machine. Raise it and peak RSS climbs past that
+# bar; delete it and the job count follows cargo's num_cpus default — a
+# property of whichever machine runs CI rather than of this build — and on a
+# wide enough host the peak clears that bar by a multiple, enough to OOM the
+# run and whatever else is resident alongside it.
 #
 # Keep in sync with `crates/archeion/src/ci_config.rs::default_rust_gate`
 # when the upstream default changes — only the `--jobs` / `--test-threads`
